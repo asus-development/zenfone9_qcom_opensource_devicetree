@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0
 
 KBUILD_OPTIONS+= DISPLAY_ROOT=$(KERNEL_SRC)/$(M)/../
+KBUILD_OPTIONS += ASUS_AI2202_DISPLAY=y
+KBUILD_OPTIONS += MODNAME=msm_drm
+KBUILD_OPTIONS += BOARD_PLATFORM=taro
+KBUILD_OPTIONS += CONFIG_DRM_MSM=m
+KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS=$(OUT_DIR)/../sm8450-modules/qcom/opensource/mmrm-driver/Module.symvers
 
 all: modules
 
