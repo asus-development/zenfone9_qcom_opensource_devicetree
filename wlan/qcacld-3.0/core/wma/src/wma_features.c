@@ -88,7 +88,7 @@
 #define ADDBA_TXAGGR_SIZE_HELIUM 64
 #define ADDBA_TXAGGR_SIZE_LITHIUM 256
 
-static bool is_wakeup_event_console_logs_enabled = false;
+static bool is_wakeup_event_console_logs_enabled = true;
 
 void wma_set_wakeup_logs_to_console(bool value)
 {
@@ -2139,12 +2139,19 @@ static void wma_log_pkt_dhcp(uint8_t *data, uint32_t length)
 static void wma_log_pkt_icmpv4(uint8_t *data, uint32_t length)
 {
 	uint16_t pkt_len, seq_num;
+	char *ip_addr;
 
 	if (length < WMA_IPV4_PKT_INFO_GET_MIN_LEN)
 		return;
 
 	pkt_len = *(uint16_t *)(data + IPV4_PKT_LEN_OFFSET);
 	seq_num = *(uint16_t *)(data + ICMP_SEQ_NUM_OFFSET);
+	ip_addr = (char *)(data + IPV4_SRC_ADDR_OFFSET);
+	wma_info("src addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
+		      ip_addr[2], ip_addr[3]);
+	ip_addr = (char *)(data + IPV4_DST_ADDR_OFFSET);
+	wma_info("dst addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
+		      ip_addr[2], ip_addr[3]);
 	wma_info("Pkt_len: %u, Seq_num: %u",
 		 qdf_cpu_to_be16(pkt_len), qdf_cpu_to_be16(seq_num));
 }
@@ -2152,12 +2159,27 @@ static void wma_log_pkt_icmpv4(uint8_t *data, uint32_t length)
 static void wma_log_pkt_icmpv6(uint8_t *data, uint32_t length)
 {
 	uint16_t pkt_len, seq_num;
+	char *ip_addr;
 
 	if (length < WMA_IPV6_PKT_INFO_GET_MIN_LEN)
 		return;
 
 	pkt_len = *(uint16_t *)(data + IPV6_PKT_LEN_OFFSET);
 	seq_num = *(uint16_t *)(data + ICMPV6_SEQ_NUM_OFFSET);
+	ip_addr = (char *)(data + IPV6_SRC_ADDR_OFFSET);
+	wma_info("src addr "IPV6_ADDR_STR, ip_addr[0],
+		 ip_addr[1], ip_addr[2], ip_addr[3], ip_addr[4],
+		 ip_addr[5], ip_addr[6], ip_addr[7], ip_addr[8],
+		 ip_addr[9], ip_addr[10], ip_addr[11],
+		 ip_addr[12], ip_addr[13], ip_addr[14],
+		 ip_addr[15]);
+	ip_addr = (char *)(data + IPV6_DST_ADDR_OFFSET);
+	wma_info("dst addr "IPV6_ADDR_STR, ip_addr[0],
+		 ip_addr[1], ip_addr[2], ip_addr[3], ip_addr[4],
+		 ip_addr[5], ip_addr[6], ip_addr[7], ip_addr[8],
+		 ip_addr[9], ip_addr[10], ip_addr[11],
+		 ip_addr[12], ip_addr[13], ip_addr[14],
+		 ip_addr[15]);
 	wma_info("Pkt_len: %u, Seq_num: %u",
 		 qdf_cpu_to_be16(pkt_len), qdf_cpu_to_be16(seq_num));
 }
