@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -23,7 +23,7 @@
 #include <wlan_twt_public_structs.h>
 #include <wlan_objmgr_peer_obj.h>
 #include <wlan_twt_tgt_if_tx_api.h>
-#include "twt/core/src/wlan_twt_cfg.h"
+#include "wlan_twt_cfg.h"
 
 QDF_STATUS
 wlan_twt_tgt_caps_get_requestor(struct wlan_objmgr_psoc *psoc, bool *val)
@@ -408,7 +408,8 @@ wlan_twt_set_peer_capabilities(struct wlan_objmgr_psoc *psoc,
 	peer = wlan_objmgr_get_peer_by_mac(psoc, peer_mac->bytes,
 					   WLAN_TWT_ID);
 	if (!peer) {
-		twt_err("Peer object not found");
+		twt_debug("Peer object not found " QDF_MAC_ADDR_FMT,
+			  QDF_MAC_ADDR_REF(peer_mac->bytes));
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -440,7 +441,8 @@ wlan_twt_get_peer_capabilities(struct wlan_objmgr_psoc *psoc,
 	peer = wlan_objmgr_get_peer_by_mac(psoc, peer_mac->bytes,
 					   WLAN_TWT_ID);
 	if (!peer) {
-		twt_err("Peer object not found");
+		twt_err("Peer object not found "QDF_MAC_ADDR_FMT,
+			QDF_MAC_ADDR_REF(peer_mac->bytes));
 		*peer_cap = 0;
 		return QDF_STATUS_E_FAILURE;
 	}

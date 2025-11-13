@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -29,7 +29,6 @@
 
 /* Include Files */
 #include <i_qdf_types.h>
-#include <stdarg.h>
 #ifdef TSOSEG_DEBUG
 #include <qdf_atomic.h>
 #endif
@@ -37,6 +36,19 @@
 
 /* Preprocessor definitions and constants */
 #define QDF_MAX_SGLIST 4
+
+#define __QDF_DECLARE_FLEX_ARRAY(type, name) \
+	struct { \
+		struct {} dummy_struct; \
+		type name[]; \
+	}
+
+/* Define a QDF macro for declaring flexible arrays */
+#define QDF_FLEX_ARRAY(type, name) \
+	union { \
+		type name ## _first_element; \
+		__QDF_DECLARE_FLEX_ARRAY(type, name); \
+	}
 
 #define CPU_CLUSTER_TYPE_LITTLE 0
 #define CPU_CLUSTER_TYPE_PERF 1
@@ -422,6 +434,7 @@ typedef bool (*qdf_irqlocked_func_t)(void *);
  * @QDF_MODULE_ID_AFC: AFC module ID
  * @QDF_MODULE_ID_WIFI_RADAR: WIFI RADAR module ID
  * @QDF_MODULE_ID_TWT: TWT module ID
+ * @QDF_MODULE_ID_COAP: Constrained Application Protocol module ID
  * @QDF_MODULE_ID_ANY: anything
  * @QDF_MODULE_ID_MAX: Max place holder module ID
  *
@@ -580,6 +593,7 @@ typedef enum {
 	QDF_MODULE_ID_AFC,
 	QDF_MODULE_ID_WIFI_RADAR,
 	QDF_MODULE_ID_TWT,
+	QDF_MODULE_ID_COAP,
 	QDF_MODULE_ID_ANY,
 	QDF_MODULE_ID_MAX,
 } QDF_MODULE_ID;
@@ -1413,6 +1427,11 @@ enum qdf_suspend_type {
  * when already connected
  * @QDF_STATS_REQ_TIMEDOUT: Stats request timedout
  * @QDF_RSO_STOP_RSP_TIMEOUT: Firmware hasn't sent RSO stop response
+ * @QDF_HOST_WAKEUP_REASON_PAGEFAULT: Host wakeup because of pagefault
+ * @QDF_SCHED_TIMEOUT: Scheduler watchdog timedout
+ * @QDF_SELF_PEER_DEL_FAILED: Failed to send self peer deletion cmd to fw
+ * @QDF_DEL_SELF_STA_FAILED: Received del self sta without del bss
+ * @QDF_FLUSH_LOGS : Recovery needed when sending flush completion to userspace
  */
 enum qdf_hang_reason {
 	QDF_REASON_UNSPECIFIED,
@@ -1445,6 +1464,11 @@ enum qdf_hang_reason {
 	QDF_STATS_REQ_TIMEDOUT,
 	QDF_TX_DESC_LEAK,
 	QDF_RSO_STOP_RSP_TIMEOUT,
+	QDF_HOST_WAKEUP_REASON_PAGEFAULT,
+	QDF_SCHED_TIMEOUT,
+	QDF_SELF_PEER_DEL_FAILED,
+	QDF_DEL_SELF_STA_FAILED,
+	QDF_FLUSH_LOGS,
 };
 
 /**
@@ -1523,6 +1547,22 @@ enum qdf_dp_tx_rx_status {
 	QDF_TX_RX_STATUS_DOWNLOAD_SUCC,
 	QDF_TX_RX_STATUS_DEFAULT,
 	QDF_TX_RX_STATUS_MAX
+};
+
+/**
+ * enum qdf_pkt_type - TX/RX packet type
+ * @QDF_TX_MGMT_PKT: Tx Management Packet
+ * @QDF_TX_DATA_PKT: Tx data Packet
+ * @QDF_RX_MGMT_PKT: Rx Management Packet
+ * @QDF_RX_DATA_PKT: Rx data Packet
+ * @QDF_INVALID_PKT: Invalid Packet type
+ */
+enum qdf_pkt_type {
+	QDF_TX_MGMT_PKT,
+	QDF_TX_DATA_PKT,
+	QDF_RX_MGMT_PKT,
+	QDF_RX_DATA_PKT,
+	QDF_INVALID_PKT
 };
 
 /**

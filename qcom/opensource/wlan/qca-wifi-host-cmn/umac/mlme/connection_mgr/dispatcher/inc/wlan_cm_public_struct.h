@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2015,2020-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -73,6 +73,7 @@ struct wlan_cm_wep_key_params {
  *	MAX_WEP_KEYS WEP keys
  * @rsn_caps: rsn caps
  * @mgmt_ciphers: mgmt cipher bitmask
+ * @user_mfp: Management frame protection state configured by user
  */
 struct wlan_cm_connect_crypto_info {
 	uint32_t wpa_versions;
@@ -83,6 +84,7 @@ struct wlan_cm_connect_crypto_info {
 	struct wlan_cm_wep_key_params wep_keys;
 	uint16_t rsn_caps;
 	uint32_t mgmt_ciphers;
+	uint8_t user_mfp;
 };
 
 #ifdef WLAN_FEATURE_FILS_SK
@@ -482,6 +484,7 @@ struct wlan_roam_sync_info {
  * @is_osen_connection: if its osen connection
  * @is_reassoc: if response is for reassoc/roam
  * @is_ft: is FT reassoc
+ * @is_assoc: if response is for assoc
  * @cm_id: Connect manager id
  * @bssid: BSSID of the ap
  * @ssid: SSID of the connection
@@ -500,7 +503,8 @@ struct wlan_cm_connect_resp {
 	uint8_t is_wps_connection:1,
 		is_osen_connection:1,
 		is_reassoc:1,
-		is_ft:1;
+		is_ft:1,
+		is_assoc:1;
 	wlan_cm_id cm_id;
 	struct qdf_mac_addr bssid;
 	struct wlan_ssid ssid;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,8 +17,8 @@
  */
 #include <wlan_twt_ucfg_ext_api.h>
 #include <wlan_twt_ucfg_ext_cfg.h>
-#include "twt/core/src/wlan_twt_cfg.h"
-#include "twt/core/src/wlan_twt_main.h"
+#include "wlan_twt_cfg.h"
+#include "wlan_twt_main.h"
 
 QDF_STATUS ucfg_twt_psoc_open(struct wlan_objmgr_psoc *psoc)
 {
@@ -84,6 +84,13 @@ ucfg_twt_nudge_req(struct wlan_objmgr_psoc *psoc,
 				   void *context)
 {
 	return wlan_twt_nudge_req(psoc, params, context);
+}
+
+QDF_STATUS
+ucfg_twt_ac_pdev_param_send(struct wlan_objmgr_psoc *psoc,
+			    enum twt_traffic_ac twt_ac)
+{
+	return wlan_twt_ac_pdev_param_send(psoc, twt_ac);
 }
 
 bool ucfg_twt_is_max_sessions_reached(struct wlan_objmgr_psoc *psoc,
@@ -192,4 +199,20 @@ bool ucfg_twt_is_command_in_progress(struct wlan_objmgr_psoc *psoc,
 {
 	return wlan_twt_is_command_in_progress(psoc, peer_mac, dialog_id, cmd,
 					       pactive_cmd);
+}
+
+void ucfg_twt_set_work_params(
+		struct wlan_objmgr_vdev *vdev,
+		struct twt_add_dialog_complete_event_param *params,
+		uint32_t twt_next_action)
+{
+	return wlan_twt_set_work_params(vdev, params, twt_next_action);
+}
+
+void ucfg_twt_get_work_params(
+		struct wlan_objmgr_vdev *vdev,
+		struct twt_work_params *params,
+		uint32_t *next_action)
+{
+	return wlan_twt_get_work_params(vdev, params, next_action);
 }

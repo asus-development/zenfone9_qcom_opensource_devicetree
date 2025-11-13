@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2011-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -302,16 +302,16 @@ bool csr_is_conn_state_wds(struct mac_context *mac, uint32_t sessionId)
 	       csr_is_conn_state_disconnected_wds(mac, sessionId);
 }
 
-enum csr_cfgdot11mode
+enum mlme_dot11_mode
 csr_get_vdev_dot11_mode(struct mac_context *mac,
 			enum QDF_OPMODE device_mode,
-			enum csr_cfgdot11mode curr_dot11_mode)
+			enum mlme_dot11_mode curr_dot11_mode)
 {
 	enum mlme_vdev_dot11_mode vdev_dot11_mode;
 	uint8_t dot11_mode_indx;
-	enum csr_cfgdot11mode dot11_mode = curr_dot11_mode;
 	uint32_t vdev_type_dot11_mode =
 				mac->mlme_cfg->dot11_mode.vdev_type_dot11_mode;
+	enum mlme_dot11_mode dot11_mode = curr_dot11_mode;
 
 	sme_debug("curr_dot11_mode %d, vdev_dot11 %08X, dev_mode %d",
 		  curr_dot11_mode, vdev_type_dot11_mode, device_mode);
@@ -344,21 +344,21 @@ csr_get_vdev_dot11_mode(struct mac_context *mac,
 	if (vdev_dot11_mode == MLME_VDEV_DOT11_MODE_AUTO)
 		dot11_mode = curr_dot11_mode;
 
-	if (CSR_IS_DOT11_MODE_11N(curr_dot11_mode) &&
+	if (IS_DOT11_MODE_HT(curr_dot11_mode) &&
 	    vdev_dot11_mode == MLME_VDEV_DOT11_MODE_11N)
-		dot11_mode = eCSR_CFG_DOT11_MODE_11N;
+		dot11_mode = MLME_DOT11_MODE_11N;
 
-	if (CSR_IS_DOT11_MODE_11AC(curr_dot11_mode) &&
+	if (IS_DOT11_MODE_VHT(curr_dot11_mode) &&
 	    vdev_dot11_mode == MLME_VDEV_DOT11_MODE_11AC)
-		dot11_mode = eCSR_CFG_DOT11_MODE_11AC;
+		dot11_mode = MLME_DOT11_MODE_11AC;
 
-	if (CSR_IS_DOT11_MODE_11AX(curr_dot11_mode) &&
+	if (IS_DOT11_MODE_HE(curr_dot11_mode) &&
 	    vdev_dot11_mode == MLME_VDEV_DOT11_MODE_11AX)
-		dot11_mode = eCSR_CFG_DOT11_MODE_11AX;
+		dot11_mode = MLME_DOT11_MODE_11AX;
 #ifdef WLAN_FEATURE_11BE
-	if (CSR_IS_DOT11_MODE_11BE(curr_dot11_mode) &&
+	if (IS_DOT11_MODE_EHT(curr_dot11_mode) &&
 	    vdev_dot11_mode == MLME_VDEV_DOT11_MODE_11BE)
-		dot11_mode = eCSR_CFG_DOT11_MODE_11BE;
+		dot11_mode = MLME_DOT11_MODE_11BE;
 #endif
 	sme_debug("INI vdev_dot11_mode %d new dot11_mode %d",
 		  vdev_dot11_mode, dot11_mode);
@@ -721,7 +721,7 @@ uint16_t csr_check_concurrent_channel_overlap(struct mac_context *mac_ctx,
 			status =
 				policy_mgr_get_sap_mandatory_channel(
 					mac_ctx->psoc, sap_ch_freq,
-					&intf_ch_freq);
+					&intf_ch_freq, vdev_id);
 			if (QDF_IS_STATUS_ERROR(status))
 				sme_err("no mandatory channel");
 		}
@@ -907,12 +907,12 @@ uint32_t csr_translate_to_wni_cfg_dot11_mode(struct mac_context *mac,
 			ret = MLME_DOT11_MODE_11N;
 		break;
 #endif
+	case eCSR_CFG_DOT11_MODE_ABG:
+		ret = MLME_DOT11_MODE_ABG;
+		break;
 	default:
 		sme_warn("doesn't expect %d as csrDo11Mode", csrDot11Mode);
-		if (BAND_2G == mac->mlme_cfg->gen.band)
-			ret = MLME_DOT11_MODE_11G;
-		else
-			ret = MLME_DOT11_MODE_11A;
+		ret = MLME_DOT11_MODE_ALL;
 		break;
 	}
 
@@ -1236,6 +1236,11 @@ QDF_STATUS csr_set_modify_profile_fields(struct mac_context *mac,
 {
 	struct csr_roam_session *pSession = CSR_GET_SESSION(mac, sessionId);
 
+	if (!pSession) {
+		sme_err("Session_id invalid %d", sessionId);
+		return QDF_STATUS_E_INVAL;
+	}
+
 	qdf_mem_copy(&pSession->modifyProfileFields,
 		     pModifyProfileFields, sizeof(tCsrRoamModifyProfileFields));
 
@@ -1418,6 +1423,7 @@ enum csr_cfgdot11mode csr_phy_mode_to_dot11mode(enum wlan_phymode phy_mode)
 	case WLAN_PHYMODE_11BEA_EHT80:
 	case WLAN_PHYMODE_11BEG_EHT80:
 	case WLAN_PHYMODE_11BEA_EHT160:
+	case WLAN_PHYMODE_11BEA_EHT320:
 		return eCSR_CFG_DOT11_MODE_11BE;
 #endif
 	default:

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -43,15 +43,13 @@ ucfg_user_space_enable_disable_rso(struct wlan_objmgr_pdev *pdev,
 				   const bool is_fast_roam_enabled);
 
 /**
- * ucfg_is_roaming_enabled() - Check if roaming enabled
- * to firmware.
- * @psoc: psoc context
+ * ucfg_is_rso_enabled() - Check if rso is enabled
+ * @pdev: Pointer to pdev
  * @vdev_id: vdev id
  *
- * Return: True if Roam state machine is in
- *	   WLAN_ROAM_RSO_ENABLED/WLAN_ROAMING_IN_PROG/WLAN_ROAM_SYNCH_IN_PROG
+ * Return: Wrapper for wlan_is_rso_enabled.
  */
-bool ucfg_is_roaming_enabled(struct wlan_objmgr_pdev *pdev, uint8_t vdev_id);
+bool ucfg_is_rso_enabled(struct wlan_objmgr_pdev *pdev, uint8_t vdev_id);
 
 /*
  * ucfg_cm_abort_roam_scan() -abort current roam scan cycle by roam scan
@@ -324,6 +322,66 @@ void ucfg_cm_reset_key(struct wlan_objmgr_pdev *pdev, uint8_t vdev_id);
 QDF_STATUS
 ucfg_cm_roam_send_rt_stats_config(struct wlan_objmgr_pdev *pdev,
 				  uint8_t vdev_id, uint8_t param_value);
+
+/**
+ * ucfg_cm_roam_send_ho_delay_config() - Send the HO delay value to Firmware
+ * @pdev: Pointer to pdev
+ * @vdev_id: vdev id
+ * @param_value: Value will be from range 20 to 1000 in msec.
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+ucfg_cm_roam_send_ho_delay_config(struct wlan_objmgr_pdev *pdev,
+				  uint8_t vdev_id, uint16_t param_value);
+
+/**
+ * ucfg_cm_exclude_rm_partial_scan_freq() - Exclude the channels in roam full
+ * scan that are already scanned as part of partial scan.
+ * @pdev: Pointer to pdev
+ * @vdev_id: vdev id
+ * @param_value: Include/exclude the partial scan channel in roam full scan
+ * 1 - Exclude
+ * 0 - Include
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+ucfg_cm_exclude_rm_partial_scan_freq(struct wlan_objmgr_pdev *pdev,
+				     uint8_t vdev_id, uint8_t param_value);
+
+/**
+ * ucfg_cm_roam_full_scan_6ghz_on_disc() - Include the 6 GHz channels in roam
+ * full scan only on prior discovery of any 6 GHz support in the environment.
+ * @pdev: Pointer to pdev
+ * @vdev_id: vdev id
+ * @param_value: Include the 6 GHz channels in roam full scan:
+ * 1 - Include only on prior discovery of any 6 GHz support in the environment
+ * 0 - Include all the supported 6 GHz channels by default
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS ucfg_cm_roam_full_scan_6ghz_on_disc(struct wlan_objmgr_pdev *pdev,
+					       uint8_t vdev_id,
+					       uint8_t param_value);
+
+/**
+ * ucfg_cm_set_roam_scan_high_rssi_offset() - Set the delta change in high RSSI
+ * at which roam scan is triggered in 2.4/5 GHz.
+ * @psoc: Pointer to psoc object
+ * @vdev_id: vdev id
+ * @param_value: Set the High RSSI delta for roam scan trigger
+ * 0    - Disable
+ * 1-16 - Set an offset value in this range
+ *
+ * Return: QDF_STATUS
+ */
+static inline QDF_STATUS
+ucfg_cm_set_roam_scan_high_rssi_offset(struct wlan_objmgr_psoc *psoc,
+				       uint8_t vdev_id, uint8_t param_value)
+{
+	return cm_set_roam_scan_high_rssi_offset(psoc, vdev_id, param_value);
+}
 #else
 static inline void
 ucfg_cm_reset_key(struct wlan_objmgr_pdev *pdev, uint8_t vdev_id) {}
@@ -331,6 +389,34 @@ ucfg_cm_reset_key(struct wlan_objmgr_pdev *pdev, uint8_t vdev_id) {}
 static inline QDF_STATUS
 ucfg_cm_roam_send_rt_stats_config(struct wlan_objmgr_pdev *pdev,
 				  uint8_t vdev_id, uint8_t param_value)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline QDF_STATUS
+ucfg_cm_roam_send_ho_delay_config(struct wlan_objmgr_pdev *pdev,
+				  uint8_t vdev_id, uint16_t param_value)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline QDF_STATUS
+ucfg_cm_exclude_rm_partial_scan_freq(struct wlan_objmgr_pdev *pdev,
+				     uint8_t vdev_id, uint8_t param_value)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline QDF_STATUS
+ucfg_cm_roam_full_scan_6ghz_on_disc(struct wlan_objmgr_pdev *pdev,
+				    uint8_t vdev_id, uint8_t param_value)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline QDF_STATUS
+ucfg_cm_set_roam_scan_high_rssi_offset(struct wlan_objmgr_psoc *psoc,
+				       uint8_t vdev_id, uint8_t param_value)
 {
 	return QDF_STATUS_SUCCESS;
 }

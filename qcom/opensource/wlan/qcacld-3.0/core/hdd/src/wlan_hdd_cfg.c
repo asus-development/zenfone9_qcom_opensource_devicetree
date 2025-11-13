@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1008,6 +1008,9 @@ QDF_STATUS hdd_set_sme_config(struct hdd_context *hdd_ctx)
 		STA_ROAM_POLICY_DFS_ENABLED;
 	mlme_obj->cfg.lfr.rso_user_config.policy_params.skip_unsafe_channels = 0;
 
+	if (config->enable_nud_tracking == DISCONNECT_AFTER_ROAM_FAIL)
+		mlme_obj->cfg.lfr.disconnect_on_nud_roam_invoke_fail = true;
+
 	status = hdd_set_sme_cfgs_related_to_mlme(hdd_ctx, sme_config);
 	if (!QDF_IS_STATUS_SUCCESS(status))
 		hdd_err("hdd_set_sme_cfgs_related_to_mlme() fail: %d", status);
@@ -1176,7 +1179,7 @@ QDF_STATUS hdd_update_nss(struct hdd_adapter *adapter, uint8_t tx_nss,
 			  adapter->vdev_id);
 		if (!bval) {
 			hdd_err("Nss in 1x1, no change required, 2x2 mode disabled");
-			return QDF_STATUS_E_FAILURE;
+			return QDF_STATUS_SUCCESS;
 		}
 
 		for (band = NSS_CHAINS_BAND_2GHZ; band < NSS_CHAINS_BAND_MAX;

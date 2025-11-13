@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1232,15 +1232,16 @@ struct cdp_tx_stats {
 	struct protocol_trace_count protocol_trace_cnt[CDP_TRACE_MAX];
 #endif
 	struct cdp_pkt_info tx_success;
+	uint32_t multiple_retry_count;
 	uint32_t nawds_mcast_drop;
 	uint32_t tx_failed;
 	uint32_t ofdma;
+	uint32_t non_amsdu_cnt;
+	uint32_t amsdu_cnt;
 	uint32_t stbc;
 	uint32_t ldpc;
 	uint32_t retries;
 	uint32_t retries_mpdu;
-	uint32_t non_amsdu_cnt;
-	uint32_t amsdu_cnt;
 	uint32_t tx_rate;
 	uint32_t last_tx_rate;
 	uint32_t last_tx_rate_mcs;
@@ -1277,6 +1278,13 @@ struct cdp_tx_stats {
 		uint32_t fw_reason1;
 		uint32_t fw_reason2;
 		uint32_t fw_reason3;
+		uint32_t fw_rem_queue_disable;
+		uint32_t fw_rem_no_match;
+		uint32_t drop_threshold;
+		uint32_t drop_link_desc_na;
+		uint32_t invalid_drop;
+		uint32_t mcast_vdev_drop;
+		uint32_t invalid_rr;
 	} dropped;
 
 
@@ -1302,7 +1310,6 @@ struct cdp_tx_stats {
 	uint32_t non_ampdu_cnt;
 	uint32_t failed_retry_count;
 	uint32_t retry_count;
-	uint32_t multiple_retry_count;
 	uint32_t last_tx_rate_used;
 
 	struct cdp_tx_pkt_info transmit_type[MAX_TRANSMIT_TYPES];
@@ -1314,6 +1321,7 @@ struct cdp_tx_stats {
 	uint32_t num_ppdu_cookie_valid;
 	uint32_t no_ack_count[QDF_PROTO_SUBTYPE_MAX];
 	struct cdp_pkt_info tx_success_twt;
+	unsigned long last_tx_ts;
 
 	uint32_t nss_info:4,
 		 mcs_info:4,
@@ -1322,7 +1330,6 @@ struct cdp_tx_stats {
 		 preamble_info:4;
 	/* mpdu retry count in case of successful transmission */
 	uint32_t mpdu_success_with_retries;
-	unsigned long last_tx_ts;
 };
 
 /* struct cdp_rx_stats - rx Level Stats
@@ -1618,6 +1625,7 @@ struct cdp_rx_ingress_stats {
  * @tx: cdp tx stats
  * @rx: cdp rx stats
  * @tso_stats: tso stats
+ * @tid_tx_stats: tid tx stats
  */
 struct cdp_vdev_stats {
 	struct cdp_tx_ingress_stats tx_i;
@@ -1625,6 +1633,10 @@ struct cdp_vdev_stats {
 	struct cdp_tx_stats tx;
 	struct cdp_rx_stats rx;
 	struct cdp_tso_stats tso_stats;
+#ifdef HW_TX_DELAY_STATS_ENABLE
+	struct cdp_tid_tx_stats tid_tx_stats[CDP_MAX_TX_COMP_RINGS]
+					    [CDP_MAX_DATA_TIDS];
+#endif
 };
 
 /* struct cdp_peer_stats - peer stats structure
@@ -1955,25 +1967,25 @@ struct cdp_htt_tx_pdev_stats_cmn_tlv {
 
 struct cdp_htt_tx_pdev_stats_urrn_tlv_v {
     struct cdp_htt_tlv_hdr tlv_hdr;
-    uint32_t urrn_stats[1]; /* HTT_TX_PDEV_MAX_URRN_STATS */
+    QDF_FLEX_ARRAY(uint32_t, urrn_stats); /* HTT_TX_PDEV_MAX_URRN_STATS */
 };
 
 /* NOTE: Variable length TLV, use length spec to infer array size */
 struct cdp_htt_tx_pdev_stats_flush_tlv_v {
     struct cdp_htt_tlv_hdr tlv_hdr;
-    uint32_t flush_errs[1]; /* HTT_TX_PDEV_MAX_FLUSH_REASON_STATS */
+    QDF_FLEX_ARRAY(uint32_t, flush_errs); /* HTT_TX_PDEV_MAX_FLUSH_REASON_STATS */
 };
 
 /* NOTE: Variable length TLV, use length spec to infer array size */
 struct cdp_htt_tx_pdev_stats_sifs_tlv_v {
     struct cdp_htt_tlv_hdr tlv_hdr;
-    uint32_t sifs_status[1]; /* HTT_TX_PDEV_MAX_SIFS_BURST_STATS */
+    QDF_FLEX_ARRAY(uint32_t, sifs_status); /* HTT_TX_PDEV_MAX_SIFS_BURST_STATS */
 };
 
 /* NOTE: Variable length TLV, use length spec to infer array size */
 struct cdp_htt_tx_pdev_stats_phy_err_tlv_v {
     struct cdp_htt_tlv_hdr tlv_hdr;
-    uint32_t  phy_errs[1]; /* HTT_TX_PDEV_MAX_PHY_ERR_STATS */
+    QDF_FLEX_ARRAY(uint32_t, phy_errs); /* HTT_TX_PDEV_MAX_PHY_ERR_STATS */
 };
 
 /* == RX PDEV/SOC STATS == */
@@ -1995,19 +2007,19 @@ struct cdp_htt_rx_soc_fw_stats_tlv {
 struct cdp_htt_rx_soc_fw_refill_ring_num_refill_tlv_v {
     struct cdp_htt_tlv_hdr tlv_hdr;
     /* Num total buf refilled from refill ring */
-    uint32_t refill_ring_num_refill[1]; /* HTT_RX_STATS_REFILL_MAX_RING */
+    QDF_FLEX_ARRAY(uint32_t, refill_ring_num_refill); /* HTT_RX_STATS_REFILL_MAX_RING */
 };
 
 struct cdp_htt_rx_pdev_fw_ring_mpdu_err_tlv_v {
     struct cdp_htt_tlv_hdr tlv_hdr;
     /* Num error MPDU for each RxDMA error type  */
-    uint32_t fw_ring_mpdu_err[1]; /* HTT_RX_STATS_RXDMA_MAX_ERR */
+    QDF_FLEX_ARRAY(uint32_t, fw_ring_mpdu_err); /* HTT_RX_STATS_RXDMA_MAX_ERR */
 };
 
 struct cdp_htt_rx_pdev_fw_mpdu_drop_tlv_v {
     struct cdp_htt_tlv_hdr tlv_hdr;
     /* Num MPDU dropped  */
-    uint32_t fw_mpdu_drop[1]; /* HTT_RX_STATS_FW_DROP_REASON_MAX */
+    QDF_FLEX_ARRAY(uint32_t, fw_mpdu_drop); /* HTT_RX_STATS_FW_DROP_REASON_MAX */
 };
 
 #define HTT_STATS_PHY_ERR_MAX 43
@@ -2075,7 +2087,7 @@ struct cdp_htt_rx_pdev_fw_stats_phy_err_tlv {
 struct cdp_htt_rx_soc_fw_refill_ring_empty_tlv_v {
     struct cdp_htt_tlv_hdr tlv_hdr;
     /* Num ring empty encountered */
-    uint32_t refill_ring_empty_cnt[1]; /* HTT_RX_STATS_REFILL_MAX_RING */
+    QDF_FLEX_ARRAY(uint32_t, refill_ring_empty_cnt); /* HTT_RX_STATS_REFILL_MAX_RING */
 };
 
 struct cdp_htt_tx_pdev_stats {
@@ -2242,6 +2254,7 @@ struct cdp_soc_stats {
  * @map_err: Mapping failure
  * @x86_fail: x86 failures
  * @low_thresh_intrs: low threshold interrupts
+ * @free_list: RX descriptors moving back to free list
  * @rx_raw_pkts: Rx Raw Packets
  * @mesh_mem_alloc: Mesh Rx Stats Alloc fail
  * @tso_desc_cnt: TSO descriptors
@@ -2290,6 +2303,7 @@ struct cdp_pdev_stats {
 		uint32_t map_err;
 		uint32_t x86_fail;
 		uint32_t low_thresh_intrs;
+		int32_t free_list;
 	} replenish;
 
 	uint32_t rx_raw_pkts;

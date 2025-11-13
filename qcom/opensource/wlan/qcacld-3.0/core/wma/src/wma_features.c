@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -73,6 +73,7 @@
 #include <wlan_crypto_global_api.h>
 #include "cdp_txrx_host_stats.h"
 #include "target_if_cm_roam_event.h"
+#include "hif.h"
 
 /**
  * WMA_SET_VDEV_IE_SOURCE_HOST - Flag to identify the source of VDEV SET IE
@@ -586,6 +587,137 @@ QDF_STATUS wma_set_wisa_params(tp_wma_handle wma_handle,
 
 	return status;
 }
+
+#ifdef FEATURE_WLAN_APF
+/*
+ * get_fw_active_apf_mode() - convert HDD APF mode to FW configurable APF
+ * mode
+ * @mode: APF mode maintained in HDD
+ *
+ * Return: FW configurable BP mode
+ */
+static enum wmi_host_active_apf_mode
+get_fw_active_apf_mode(enum active_apf_mode mode)
+{
+	switch (mode) {
+	case ACTIVE_APF_DISABLED:
+		return WMI_HOST_ACTIVE_APF_DISABLED;
+	case ACTIVE_APF_ENABLED:
+		return WMI_HOST_ACTIVE_APF_ENABLED;
+	case ACTIVE_APF_ADAPTIVE:
+		return WMI_HOST_ACTIVE_APF_ADAPTIVE;
+	default:
+		wma_err("Invalid Active APF Mode %d; Using 'disabled'", mode);
+		return WMI_HOST_ACTIVE_APF_DISABLED;
+	}
+}
+
+QDF_STATUS wma_enable_active_apf_mode(WMA_HANDLE handle, tAniDHCPInd *ta_dhcp_ind)
+{
+	tp_wma_handle wma_handle = (tp_wma_handle) handle;
+	enum wmi_host_active_apf_mode uc_mode, mcbc_mode;
+	struct vdev_mlme_obj *vdev_mlme;
+	struct wlan_objmgr_vdev *vdev;
+	uint8_t vdev_id;
+	QDF_STATUS ret = QDF_STATUS_SUCCESS;
+
+	if (!ta_dhcp_ind) {
+		wma_err("DHCP indication is NULL");
+		return QDF_STATUS_E_FAILURE;
+	}
+	wma_debug("Enabling active apf mode");
+
+	if (wma_find_vdev_id_by_addr(wma_handle,
+				     ta_dhcp_ind->adapterMacAddr.bytes,
+				     &vdev_id)) {
+		wma_err("Failed to find vdev id for DHCP indication");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(wma_handle->psoc,
+						    vdev_id,
+						    WLAN_LEGACY_WMA_ID);
+	if (!vdev)
+		return -EINVAL;
+
+	vdev_mlme = wlan_vdev_mlme_get_cmpt_obj(vdev);
+	if (!vdev_mlme) {
+		wma_err("Failed to get vdev mlme obj!");
+		ret = -EINVAL;
+		goto release_ref_and_return;
+	}
+	if (vdev_mlme->mgmt.generic.type == WMI_VDEV_TYPE_STA &&
+	    ucfg_pmo_is_apf_enabled(wma_handle->psoc)) {
+		uc_mode = get_fw_active_apf_mode(wma_handle->active_uc_apf_mode);
+		mcbc_mode = get_fw_active_apf_mode(wma_handle->active_mc_bc_apf_mode);
+		wma_debug("Configuring Active APF Mode UC:%d MC/BC:%d for vdev %u",
+			  uc_mode, mcbc_mode, vdev_id);
+
+		ret = wmi_unified_set_active_apf_mode_cmd(wma_handle->wmi_handle, vdev_id,
+							  uc_mode, mcbc_mode);
+
+		if (QDF_IS_STATUS_ERROR(ret))
+			wma_err("Failed to configure active APF mode");
+	}
+release_ref_and_return:
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_WMA_ID);
+	return ret;
+}
+
+QDF_STATUS wma_disable_active_apf_mode(WMA_HANDLE handle, tAniDHCPInd *ta_dhcp_ind)
+{
+	tp_wma_handle wma_handle = (tp_wma_handle)handle;
+	enum wmi_host_active_apf_mode uc_mode, mcbc_mode;
+	struct vdev_mlme_obj *vdev_mlme;
+	struct wlan_objmgr_vdev *vdev;
+	uint8_t vdev_id;
+	QDF_STATUS ret = QDF_STATUS_SUCCESS;
+
+	if (!ta_dhcp_ind) {
+		wma_err("DHCP indication is NULL");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	wma_debug("Disabling active apf mode");
+
+	if (wma_find_vdev_id_by_addr(wma_handle,
+				     ta_dhcp_ind->adapterMacAddr.bytes,
+				     &vdev_id)) {
+		wma_err("Failed to find vdev id for DHCP indication");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(wma_handle->psoc,
+						    vdev_id,
+						    WLAN_LEGACY_WMA_ID);
+	if (!vdev)
+		return -EINVAL;
+
+	vdev_mlme = wlan_vdev_mlme_get_cmpt_obj(vdev);
+	if (!vdev_mlme) {
+		wma_err("Failed to get vdev mlme obj!");
+		ret = -EINVAL;
+		goto release_ref_and_return;
+	}
+	if (vdev_mlme->mgmt.generic.type == WMI_VDEV_TYPE_STA &&
+	    ucfg_pmo_is_apf_enabled(wma_handle->psoc)) {
+		uc_mode = WMI_HOST_ACTIVE_APF_DISABLED;
+		mcbc_mode = WMI_HOST_ACTIVE_APF_DISABLED;
+
+		wma_debug("Configuring Active APF Mode UC:%d MC/BC:%d for vdev %u",
+			  uc_mode, mcbc_mode, vdev_id);
+
+		ret = wmi_unified_set_active_apf_mode_cmd(wma_handle->wmi_handle, vdev_id,
+							  uc_mode, mcbc_mode);
+
+		if (QDF_IS_STATUS_ERROR(ret))
+			wma_err("Failed to configure active APF mode");
+	}
+release_ref_and_return:
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_WMA_ID);
+	return ret;
+}
+#endif /* FEATURE_WLAN_APF */
 
 /**
  * wma_process_dhcp_ind() - process dhcp indication from SME
@@ -1647,6 +1779,10 @@ static const uint8_t *wma_wow_wake_reason_str(A_INT32 wake_reason)
 		return "ROAM_STATS";
 	case WOW_REASON_RTT_11AZ:
 		return "WOW_REASON_RTT_11AZ";
+	case WOW_REASON_DELAYED_WAKEUP_HOST_CFG_TIMER_ELAPSED:
+		return "DELAYED_WAKEUP_TIMER_ELAPSED";
+	case WOW_REASON_DELAYED_WAKEUP_DATA_STORE_LIST_FULL:
+		return "DELAYED_WAKEUP_DATA_STORE_LIST_FULL";
 	default:
 		return "unknown";
 	}
@@ -2024,7 +2160,7 @@ wma_wow_get_pkt_proto_subtype(uint8_t *data, uint32_t len)
 	eth_type = *(uint16_t *)(data + QDF_NBUF_TRAC_ETH_TYPE_OFFSET);
 	eth_type = qdf_cpu_to_be16(eth_type);
 
-	wma_info("Ether Type: 0x%04x", eth_type);
+	wma_debug("Ether Type: 0x%04x", eth_type);
 	switch (eth_type) {
 	case QDF_NBUF_TRAC_EAPOL_ETH_TYPE:
 		if (len < WMA_EAPOL_SUBTYPE_GET_MIN_LEN)
@@ -2047,7 +2183,7 @@ wma_wow_get_pkt_proto_subtype(uint8_t *data, uint32_t len)
 		wma_debug("IPV4 Packet");
 
 		proto_type = qdf_nbuf_data_get_ipv4_proto(data);
-		wma_info("IPV4_proto_type: %u", proto_type);
+		wma_debug("IPV4_proto_type: %u", proto_type);
 
 		switch (proto_type) {
 		case QDF_NBUF_TRAC_ICMP_TYPE:
@@ -2084,7 +2220,7 @@ wma_wow_get_pkt_proto_subtype(uint8_t *data, uint32_t len)
 		wma_debug("IPV6 Packet");
 
 		proto_type = qdf_nbuf_data_get_ipv6_proto(data);
-		wma_info("IPV6_proto_type: %u", proto_type);
+		wma_debug("IPV6_proto_type: %u", proto_type);
 
 		switch (proto_type) {
 		case QDF_NBUF_TRAC_ICMPV6_TYPE:
@@ -2118,7 +2254,7 @@ static void wma_log_pkt_eapol(uint8_t *data, uint32_t length)
 
 	pkt_len = *(uint16_t *)(data + EAPOL_PKT_LEN_OFFSET);
 	key_len = *(uint16_t *)(data + EAPOL_KEY_LEN_OFFSET);
-	wma_info("Pkt_len: %u, Key_len: %u",
+	wma_debug("Pkt_len: %u, Key_len: %u",
 		 qdf_cpu_to_be16(pkt_len), qdf_cpu_to_be16(key_len));
 }
 
@@ -2132,7 +2268,7 @@ static void wma_log_pkt_dhcp(uint8_t *data, uint32_t length)
 
 	pkt_len = *(uint16_t *)(data + DHCP_PKT_LEN_OFFSET);
 	trans_id = *(uint32_t *)(data + DHCP_TRANSACTION_ID_OFFSET);
-	wma_info("Pkt_len: %u, Transaction_id: %u",
+	wma_debug("Pkt_len: %u, Transaction_id: %u",
 		 qdf_cpu_to_be16(pkt_len), qdf_cpu_to_be16(trans_id));
 }
 
@@ -2145,7 +2281,7 @@ static void wma_log_pkt_icmpv4(uint8_t *data, uint32_t length)
 
 	pkt_len = *(uint16_t *)(data + IPV4_PKT_LEN_OFFSET);
 	seq_num = *(uint16_t *)(data + ICMP_SEQ_NUM_OFFSET);
-	wma_info("Pkt_len: %u, Seq_num: %u",
+	wma_debug("Pkt_len: %u, Seq_num: %u",
 		 qdf_cpu_to_be16(pkt_len), qdf_cpu_to_be16(seq_num));
 }
 
@@ -2158,7 +2294,7 @@ static void wma_log_pkt_icmpv6(uint8_t *data, uint32_t length)
 
 	pkt_len = *(uint16_t *)(data + IPV6_PKT_LEN_OFFSET);
 	seq_num = *(uint16_t *)(data + ICMPV6_SEQ_NUM_OFFSET);
-	wma_info("Pkt_len: %u, Seq_num: %u",
+	wma_debug("Pkt_len: %u, Seq_num: %u",
 		 qdf_cpu_to_be16(pkt_len), qdf_cpu_to_be16(seq_num));
 }
 
@@ -2172,10 +2308,10 @@ static void wma_log_pkt_ipv4(uint8_t *data, uint32_t length)
 
 	pkt_len = *(uint16_t *)(data + IPV4_PKT_LEN_OFFSET);
 	ip_addr = (char *)(data + IPV4_SRC_ADDR_OFFSET);
-	wma_info("src addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
+	wma_nofl_debug("src addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
 		      ip_addr[2], ip_addr[3]);
 	ip_addr = (char *)(data + IPV4_DST_ADDR_OFFSET);
-	wma_info("dst addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
+	wma_nofl_debug("dst addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
 		      ip_addr[2], ip_addr[3]);
 	src_port = *(uint16_t *)(data + IPV4_SRC_PORT_OFFSET);
 	dst_port = *(uint16_t *)(data + IPV4_DST_PORT_OFFSET);
@@ -2195,14 +2331,14 @@ static void wma_log_pkt_ipv6(uint8_t *data, uint32_t length)
 
 	pkt_len = *(uint16_t *)(data + IPV6_PKT_LEN_OFFSET);
 	ip_addr = (char *)(data + IPV6_SRC_ADDR_OFFSET);
-	wma_info("src addr "IPV6_ADDR_STR, ip_addr[0],
+	wma_nofl_debug("src addr "IPV6_ADDR_STR, ip_addr[0],
 		 ip_addr[1], ip_addr[2], ip_addr[3], ip_addr[4],
 		 ip_addr[5], ip_addr[6], ip_addr[7], ip_addr[8],
 		 ip_addr[9], ip_addr[10], ip_addr[11],
 		 ip_addr[12], ip_addr[13], ip_addr[14],
 		 ip_addr[15]);
 	ip_addr = (char *)(data + IPV6_DST_ADDR_OFFSET);
-	wma_info("dst addr "IPV6_ADDR_STR, ip_addr[0],
+	wma_nofl_debug("dst addr "IPV6_ADDR_STR, ip_addr[0],
 		 ip_addr[1], ip_addr[2], ip_addr[3], ip_addr[4],
 		 ip_addr[5], ip_addr[6], ip_addr[7], ip_addr[8],
 		 ip_addr[9], ip_addr[10], ip_addr[11],
@@ -2224,7 +2360,7 @@ static void wma_log_pkt_tcpv4(uint8_t *data, uint32_t length)
 		return;
 
 	seq_num = *(uint32_t *)(data + IPV4_TCP_SEQ_NUM_OFFSET);
-	wma_info("TCP_seq_num: %u", qdf_cpu_to_be16(seq_num));
+	wma_debug("TCP_seq_num: %u", qdf_cpu_to_be16(seq_num));
 }
 
 static void wma_log_pkt_tcpv6(uint8_t *data, uint32_t length)
@@ -2235,7 +2371,7 @@ static void wma_log_pkt_tcpv6(uint8_t *data, uint32_t length)
 		return;
 
 	seq_num = *(uint32_t *)(data + IPV6_TCP_SEQ_NUM_OFFSET);
-	wma_info("TCP_seq_num: %u", qdf_cpu_to_be16(seq_num));
+	wma_debug("TCP_seq_num: %u", qdf_cpu_to_be16(seq_num));
 }
 
 static void wma_wow_inc_wake_lock_stats_by_dst_addr(t_wma_handle *wma,
@@ -2597,8 +2733,10 @@ static int wma_wake_event_packet(
 	case WOW_REASON_RA_MATCH:
 	case WOW_REASON_RECV_MAGIC_PATTERN:
 	case WOW_REASON_PACKET_FILTER_MATCH:
-		wma_debug("Wake event packet:");
-		qdf_trace_hex_dump(QDF_MODULE_ID_WMA, QDF_TRACE_LEVEL_DEBUG,
+	case WOW_REASON_DELAYED_WAKEUP_HOST_CFG_TIMER_ELAPSED:
+	case WOW_REASON_DELAYED_WAKEUP_DATA_STORE_LIST_FULL:
+		wma_info("Wake event packet:");
+		qdf_trace_hex_dump(QDF_MODULE_ID_WMA, QDF_TRACE_LEVEL_INFO,
 				   packet, packet_len);
 
 		vdev = &wma->interfaces[wake_info->vdev_id];
@@ -2872,6 +3010,92 @@ static void wma_wake_event_log_reason(t_wma_handle *wma,
 }
 
 /**
+ * wma_wow_wakeup_host_trigger_ssr() - Trigger SSR on host wakeup
+ * @handle: wma handle
+ * @reason: Host wakeup reason
+ *
+ * This function triggers SSR if host is woken up by fw with reason as pagefault
+ *
+ * Return: None
+ */
+static void
+wma_wow_wakeup_host_trigger_ssr(t_wma_handle *wma, uint32_t reason)
+{
+	uint8_t pagefault_wakeups_for_ssr;
+	uint32_t interval_for_pagefault_wakeup_counts;
+	qdf_time_t curr_time;
+	struct mac_context *mac = cds_get_context(QDF_MODULE_ID_PE);
+	int i;
+	bool ignore_pf = true;
+
+	if (!mac) {
+		wma_debug("NULL mac ptr");
+		return;
+	}
+
+	if (WOW_REASON_PAGE_FAULT != reason)
+		return;
+
+	if (!mac->sme.ssr_on_pagefault_cb) {
+		wma_debug("NULL SSR on pagefault cb");
+		return;
+	}
+
+	if (!wlan_pmo_enable_ssr_on_page_fault(wma->psoc))
+		return;
+
+	if (wmi_get_runtime_pm_inprogress(wma->wmi_handle)) {
+		wma_debug("Ignore run time pm wakeup");
+		return;
+	}
+
+	pagefault_wakeups_for_ssr =
+			wlan_pmo_get_max_pagefault_wakeups_for_ssr(wma->psoc);
+
+	interval_for_pagefault_wakeup_counts =
+		wlan_pmo_get_interval_for_pagefault_wakeup_counts(wma->psoc);
+
+	curr_time = qdf_get_time_of_the_day_ms();
+
+	for (i = wma->num_page_fault_wakeups - 1; i >= 0; i--) {
+		if (curr_time - wma->pagefault_wakeups_ts[i] >
+		    interval_for_pagefault_wakeup_counts) {
+			if (i == wma->num_page_fault_wakeups - 1) {
+				wma->num_page_fault_wakeups = 0;
+			} else {
+				qdf_mem_copy(&wma->pagefault_wakeups_ts[0],
+					&wma->pagefault_wakeups_ts[i+1],
+					(wma->num_page_fault_wakeups - (i+1)) *
+					sizeof(qdf_time_t));
+				wma->num_page_fault_wakeups -= (i + 1);
+			}
+			ignore_pf = false;
+			break;
+		}
+	}
+
+	if (wma->num_page_fault_wakeups == pagefault_wakeups_for_ssr) {
+		qdf_mem_copy(&wma->pagefault_wakeups_ts[0],
+			     &wma->pagefault_wakeups_ts[1],
+			     (pagefault_wakeups_for_ssr - 1) *
+			     sizeof(qdf_time_t));
+		wma->num_page_fault_wakeups--;
+	}
+
+	wma->pagefault_wakeups_ts[wma->num_page_fault_wakeups++] = curr_time;
+
+	wma_nofl_debug("num pagefault wakeups %d", wma->num_page_fault_wakeups);
+
+	if (!ignore_pf ||
+	    (wma->num_page_fault_wakeups < pagefault_wakeups_for_ssr))
+		return;
+
+	if (curr_time - wma->pagefault_wakeups_ts[0] <=
+					interval_for_pagefault_wakeup_counts)
+		mac->sme.ssr_on_pagefault_cb();
+}
+
+/**
  * wma_wow_wakeup_host_event() - wakeup host event handler
  * @handle: wma handle
  * @event: event data
@@ -2903,6 +3127,11 @@ int wma_wow_wakeup_host_event(void *handle, uint8_t *event, uint32_t len)
 	}
 
 	wma_wake_event_log_reason(wma, wake_info);
+	wma_wow_wakeup_host_trigger_ssr(wma, wake_info->wake_reason);
+
+	if (wake_info->wake_reason == WOW_REASON_LOCAL_DATA_UC_DROP)
+		hif_pm_runtime_set_delay(cds_get_context(QDF_MODULE_ID_HIF),
+					 WOW_LARGE_RX_RTPM_DELAY);
 
 	ucfg_pmo_psoc_wakeup_host_event_received(wma->psoc);
 
@@ -3679,8 +3908,8 @@ int wma_update_tdls_peer_state(WMA_HANDLE handle,
 		goto end_tdls_peer_state;
 	}
 
-	if (MLME_IS_ROAM_SYNCH_IN_PROGRESS(wma_handle->psoc,
-					   peer_state->vdev_id)) {
+	if (wlan_cm_is_roam_sync_in_progress(wma_handle->psoc,
+					     peer_state->vdev_id)) {
 		wma_err("roaming in progress, reject peer update cmd!");
 		ret = -EPERM;
 		goto end_tdls_peer_state;
@@ -5275,6 +5504,7 @@ static void wma_send_set_key_rsp(uint8_t vdev_id, bool pairwise,
 			     QDF_MAC_ADDR_SIZE);
 		wma_send_msg_high_priority(wma, WMA_SET_STAKEY_RSP,
 					   key_info_uc, 0);
+		wlan_release_peer_key_wakelock(wma->pdev, crypto_key->macaddr);
 	} else {
 		key_info_mc = qdf_mem_malloc(sizeof(*key_info_mc));
 		if (!key_info_mc)
@@ -5334,14 +5564,6 @@ void wma_update_set_key(uint8_t session_id, bool pairwise,
 
 	if (iface)
 		iface->is_waiting_for_key = false;
-
-	if (!pairwise && iface) {
-		/* Its GTK release the wake lock */
-		wma_debug("Release set key wake lock");
-		qdf_runtime_pm_allow_suspend(
-				&iface->vdev_set_key_runtime_wakelock);
-		wma_release_wakelock(&iface->vdev_set_key_wakelock);
-	}
 
 	wma_send_set_key_rsp(session_id, pairwise, key_index);
 }
@@ -5430,3 +5652,36 @@ int wma_get_ani_level_evt_handler(void *handle, uint8_t *event_buf,
 }
 #endif
 
+#ifdef WLAN_FEATURE_PEER_TXQ_FLUSH_CONF
+/**
+ * wma_peer_txq_flush_config_send() - Flush peer txq
+ * @params: peer_txq_flush_config_params params
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS
+wma_peer_txq_flush_config_send(struct peer_txq_flush_config_params *params)
+{
+	tp_wma_handle wma_handle = cds_get_context(QDF_MODULE_ID_WMA);
+	struct wmi_unified *wmi_handle = wma_handle->wmi_handle;
+
+	return wmi_unified_peer_txq_flush_config_send(wmi_handle, params);
+}
+
+/**
+ * wma_peer_flush_tids_send() - Flush peer txq
+ * @peer_addr: peer address
+ * @param: peer flush params
+ *
+ * Return: QDF Status
+ */
+QDF_STATUS
+wma_peer_flush_tids_send(uint8_t peer_addr[QDF_MAC_ADDR_SIZE],
+			 struct peer_flush_params *param)
+{
+	tp_wma_handle wma_handle = cds_get_context(QDF_MODULE_ID_WMA);
+	struct wmi_unified *wmi_handle = wma_handle->wmi_handle;
+
+	return wmi_unified_peer_flush_tids_send(wmi_handle, peer_addr, param);
+}
+#endif

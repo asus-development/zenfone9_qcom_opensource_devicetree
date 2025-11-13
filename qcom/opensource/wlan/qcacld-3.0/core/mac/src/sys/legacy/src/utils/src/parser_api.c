@@ -1994,22 +1994,42 @@ populate_dot11f_supp_channels(struct mac_context *mac,
 			      tDot11fIESuppChannels *pDot11f,
 			      uint8_t nAssocType, struct pe_session *pe_session)
 {
-	uint8_t i;
+	uint8_t i, j = 0;
 	uint8_t *p;
 	struct supported_channels supportedChannels;
+	uint8_t channel, opclass, base_opclass;
+	uint8_t reg_cc[REG_ALPHA2_LEN + 1];
 
 	wlan_add_supported_5Ghz_channels(mac->psoc, mac->pdev,
 					 supportedChannels.channelList,
 					 &supportedChannels.numChnl,
 					 false);
+
 	p = supportedChannels.channelList;
 	pDot11f->num_bands = supportedChannels.numChnl;
+	wlan_reg_read_current_country(mac->psoc, reg_cc);
 
-	for (i = 0U; i < pDot11f->num_bands; ++i, ++p) {
-		pDot11f->bands[i][0] = *p;
-		pDot11f->bands[i][1] = 1;
+	for (i = 0U; i < pDot11f->num_bands; i++) {
+		base_opclass = wlan_reg_dmn_get_opclass_from_channel(
+						reg_cc,
+						p[i], BW20);
+		pDot11f->bands[j][0] = p[i];
+		pDot11f->bands[j][1] = 1;
+		channel = p[i];
+		while (i + 1 < pDot11f->num_bands && (p[i + 1] == channel + 4)) {
+			opclass = wlan_reg_dmn_get_opclass_from_channel(
+						reg_cc,
+						p[i + 1], BW20);
+			if (base_opclass != opclass)
+				goto skip;
+			pDot11f->bands[j][1]++;
+			channel = p[++i];
+		}
+skip:
+		j++;
 	}
 
+	pDot11f->num_bands = j;
 	pDot11f->present = 1;
 
 } /* End populate_dot11f_supp_channels. */
@@ -3753,6 +3773,10 @@ sir_convert_assoc_resp_frame2_struct(struct mac_context *mac,
 			ext_cap->fine_time_meas_responder);
 	}
 
+	if (ar->OperatingMode.present) {
+		qdf_mem_copy(&pAssocRsp->oper_mode_ntf, &ar->OperatingMode,
+			     sizeof(tDot11fIEOperatingMode));
+	}
 	if (ar->QosMapSet.present) {
 		pAssocRsp->QosMapSet.present = 1;
 		convert_qos_mapset_frame(mac, &pAssocRsp->QosMapSet,
@@ -3808,6 +3832,10 @@ sir_convert_assoc_resp_frame2_struct(struct mac_context *mac,
 		pe_debug("320MHz support: %d",
 			 pAssocRsp->eht_cap.support_320mhz_6ghz);
 	}
+
+	if (ar->eht_op.present)
+		qdf_mem_copy(&pAssocRsp->eht_op, &ar->eht_op,
+			     sizeof(tDot11fIEeht_op));
 
 	if (ar->he_6ghz_band_cap.present) {
 		pe_debug("11AX: HE Band Capability IE present");
@@ -7702,6 +7730,8 @@ populate_dot11f_mlo_caps(struct mac_context *mac_ctx,
 	mlo_ie->medium_sync_delay_info_present = 0;
 	mlo_ie->eml_capab_present = 0;
 	mlo_ie->mld_capab_present = 1;
+	mlo_ie->reserved = 0;
+	mlo_ie->reserved_1 = 0;
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -7755,6 +7785,7 @@ QDF_STATUS populate_dot11f_twt_extended_caps(struct mac_context *mac_ctx,
 
 	dot11f->num_bytes = DOT11F_IE_EXTCAP_MAX_LEN;
 	p_ext_cap = (struct s_ext_cap *)dot11f->bytes;
+	dot11f->present = 1;
 
 	if (pe_session->opmode == QDF_STA_MODE)
 		p_ext_cap->twt_requestor_support =
@@ -7767,6 +7798,10 @@ QDF_STATUS populate_dot11f_twt_extended_caps(struct mac_context *mac_ctx,
 			twt_get_responder_flag(mac_ctx);
 
 	dot11f->num_bytes = lim_compute_ext_cap_ie_length(dot11f);
+	if (!dot11f->num_bytes) {
+		dot11f->present = 0;
+		pe_debug("ext ie length become 0, disable the ext caps");
+	}
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -8525,6 +8560,7 @@ QDF_STATUS populate_dot11f_btm_extended_caps(struct mac_context *mac_ctx,
 	pe_debug("enter");
 	dot11f->num_bytes = DOT11F_IE_EXTCAP_MAX_LEN;
 	p_ext_cap = (struct s_ext_cap *)dot11f->bytes;
+	dot11f->present = 1;
 
 	status = cm_akm_roam_allowed(mac_ctx->psoc, pe_session->vdev);
 	if (QDF_IS_STATUS_ERROR(status)) {
@@ -8532,7 +8568,22 @@ QDF_STATUS populate_dot11f_btm_extended_caps(struct mac_context *mac_ctx,
 		pe_debug("Disable btm for roaming not suppprted");
 	}
 
+	if (!pe_session->lim_join_req)
+		goto compute_len;
+
+	if (p_ext_cap->bss_transition && !cm_is_open_mode(pe_session->vdev) &&
+	    pe_session->lim_join_req->bssDescription.mbo_oce_enabled_ap &&
+	    !pe_session->limRmfEnabled) {
+		pe_debug("Disable BTM as the MBO AP doesn't support PMF");
+		p_ext_cap->bss_transition = 0;
+	}
+
+compute_len:
 	dot11f->num_bytes = lim_compute_ext_cap_ie_length(dot11f);
+	if (!dot11f->num_bytes) {
+		dot11f->present = 0;
+		pe_debug("ext ie length become 0, disable the ext caps");
+	}
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -8687,6 +8738,11 @@ QDF_STATUS populate_dot11f_assoc_req_mlo_ie(struct mac_context *mac_ctx,
 
 	/* find out number of links from bcn or prb rsp */
 	total_sta_prof = 1;
+	if (wlan_mlme_is_sta_single_mlo_conn(
+				wlan_vdev_get_psoc(pe_session->vdev))) {
+		pe_debug("Single link mlo connection is enabled for mlo sta");
+		total_sta_prof = 0;
+	}
 	partner_info = &pe_session->lim_join_req->partner_info;
 
 	mlo_dev_ctx = pe_session->vdev->mlo_dev_ctx;

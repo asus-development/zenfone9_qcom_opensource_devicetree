@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -38,9 +39,9 @@
 #define __zalloc_auto(size) \
 	kzalloc(size, __can_sleep() ? GFP_KERNEL : GFP_ATOMIC)
 
-#define __free(ptr) kfree(ptr)
+#define __k_free(ptr) kfree(ptr)
 
-#define __alloc_size(ptr) ksize(ptr)
+#define __qdf_alloc_size(ptr) ksize(ptr)
 
 #endif /* __I_QDF_TALLOC_H */
 

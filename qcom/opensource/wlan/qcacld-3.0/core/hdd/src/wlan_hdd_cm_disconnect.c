@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -145,6 +146,36 @@ void __hdd_cm_disconnect_handler_pre_user_update(struct hdd_adapter *adapter)
 	hdd_place_marker(adapter, "DISCONNECTED", NULL);
 }
 
+/**
+ * hdd_reset_sta_keep_alive_interval() - Reset STA keep alive interval
+ * @adapter: HDD adapter pointer.
+ * @hdd_ctx: HDD context pointer.
+ *
+ * Return: None.
+ */
+static void
+hdd_reset_sta_keep_alive_interval(struct hdd_adapter *adapter,
+				  struct hdd_context *hdd_ctx)
+{
+	enum QDF_OPMODE device_mode = adapter->device_mode;
+	uint32_t keep_alive_interval;
+
+	if (adapter->keep_alive_interval)
+		return;
+
+	if (device_mode != QDF_STA_MODE) {
+		hdd_debug("Not supported for device mode %s = ",
+			  device_mode_to_string(device_mode));
+		return;
+	}
+
+	wlan_hdd_save_sta_keep_alive_interval(adapter, 0);
+	ucfg_mlme_get_sta_keep_alive_period(hdd_ctx->psoc,
+					    &keep_alive_interval);
+	hdd_vdev_send_sta_keep_alive_interval(adapter, hdd_ctx,
+					      keep_alive_interval);
+}
+
 void __hdd_cm_disconnect_handler_post_user_update(struct hdd_adapter *adapter,
 						  struct wlan_objmgr_vdev *vdev)
 {
@@ -199,6 +230,7 @@ void __hdd_cm_disconnect_handler_post_user_update(struct hdd_adapter *adapter,
 
 	hdd_nud_reset_tracking(adapter);
 	hdd_reset_limit_off_chan(adapter);
+	hdd_reset_sta_keep_alive_interval(adapter, hdd_ctx);
 
 	hdd_cm_print_bss_info(sta_ctx);
 }
@@ -225,6 +257,7 @@ QDF_STATUS wlan_hdd_cm_issue_disconnect(struct hdd_adapter *adapter,
 		return QDF_STATUS_E_INVAL;
 	hdd_place_marker(adapter, "TRY TO DISCONNECT", NULL);
 	reset_mscs_params(adapter);
+	hdd_conn_set_authenticated(adapter, false);
 	wlan_hdd_netif_queue_control(adapter,
 				     WLAN_STOP_ALL_NETIF_QUEUE_N_CARRIER,
 				     WLAN_CONTROL_PATH);
@@ -318,6 +351,8 @@ hdd_cm_disconnect_complete_pre_user_update(struct wlan_objmgr_vdev *vdev,
 		hdd_err("adapter is NULL for vdev %d", wlan_vdev_get_id(vdev));
 		return QDF_STATUS_E_INVAL;
 	}
+
+	hdd_conn_set_authenticated(adapter, false);
 	hdd_napi_serialize(0);
 	hdd_disable_and_flush_mc_addr_list(adapter, pmo_peer_disconnect);
 	__hdd_cm_disconnect_handler_pre_user_update(adapter);
@@ -353,8 +388,7 @@ static void hdd_cm_set_default_wlm_mode(struct hdd_adapter *adapter)
 	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	bool reset;
 	uint8_t def_level;
-	mac_handle_t mac_handle;
-	uint16_t vdev_id;
+	uint32_t client_id_bitmap;
 
 	if (!hdd_ctx) {
 		hdd_err("hdd_ctx is NULL");
@@ -373,15 +407,24 @@ static void hdd_cm_set_default_wlm_mode(struct hdd_adapter *adapter)
 	if (QDF_IS_STATUS_ERROR(status))
 		def_level = QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_NORMAL;
 
-	mac_handle = hdd_ctx->mac_handle;
-	vdev_id = adapter->vdev_id;
-
-	status = sme_set_wlm_latency_level(mac_handle, vdev_id, def_level);
-	if (QDF_IS_STATUS_SUCCESS(status)) {
-		hdd_debug("reset wlm mode %x on disconnection", def_level);
-		adapter->latency_level = def_level;
+	if (hdd_get_multi_client_ll_support(adapter)) {
+		client_id_bitmap = wlan_hdd_get_client_id_bitmap(adapter);
+		hdd_debug("client_id_bitmap: 0x%x", client_id_bitmap);
+		status = wlan_hdd_set_wlm_latency_level(adapter, def_level,
+							client_id_bitmap, true);
+		wlan_hdd_deinit_multi_client_info_table(adapter);
 	} else {
-		hdd_err("reset wlm mode failed: %d", status);
+		status =
+			sme_set_wlm_latency_level(hdd_ctx->mac_handle,
+						  adapter->vdev_id, def_level,
+						  0, false);
+		if (QDF_IS_STATUS_SUCCESS(status)) {
+			hdd_debug("reset wlm mode %x on disconnection",
+				  def_level);
+			adapter->latency_level = def_level;
+		} else {
+			hdd_err("reset wlm mode failed: %d", status);
+		}
 	}
 }
 
@@ -433,6 +476,7 @@ hdd_cm_disconnect_complete_post_user_update(struct wlan_objmgr_vdev *vdev,
 		hdd_err("adapter is NULL for vdev %d", wlan_vdev_get_id(vdev));
 		return QDF_STATUS_E_INVAL;
 	}
+
 	if (adapter->device_mode == QDF_STA_MODE) {
 	/* Inform FTM TIME SYNC about the disconnection with the AP */
 		hdd_ftm_time_sync_sta_state_notify(
@@ -547,3 +591,36 @@ QDF_STATUS hdd_cm_napi_serialize_control(bool action)
 
 	return QDF_STATUS_SUCCESS;
 }
+
+#ifdef WLAN_BOOST_CPU_FREQ_IN_ROAM
+QDF_STATUS hdd_cm_perfd_set_cpufreq(bool action)
+{
+	struct wlan_core_minfreq req;
+	struct hdd_context *hdd_ctx;
+
+	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
+	if (unlikely(!hdd_ctx)) {
+		hdd_err("cannot get hdd_context");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	if (action) {
+		req.magic    = WLAN_CORE_MINFREQ_MAGIC;
+		req.reserved = 0; /* unused */
+		req.coremask = 0x00ff;/* big and little cluster */
+		req.freq     = 0xfff;/* set to max freq */
+	} else {
+		req.magic    = WLAN_CORE_MINFREQ_MAGIC;
+		req.reserved = 0; /* unused */
+		req.coremask = 0; /* not valid */
+		req.freq     = 0; /* reset */
+	}
+
+	hdd_debug("CPU min freq to 0x%x coremask 0x%x", req.freq, req.coremask);
+	/* the following service function returns void */
+	wlan_hdd_send_svc_nlink_msg(hdd_ctx->radio_index,
+				    WLAN_SVC_CORE_MINFREQ,
+				    &req, sizeof(struct wlan_core_minfreq));
+	return QDF_STATUS_SUCCESS;
+}
+#endif

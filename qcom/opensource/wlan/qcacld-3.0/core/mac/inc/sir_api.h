@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -78,7 +78,7 @@ struct mac_context;
 
 typedef uint8_t tSirIpv4Addr[QDF_IPV4_ADDR_SIZE];
 
-#define SIR_VERSION_STRING_LEN 64
+#define SIR_VERSION_STRING_LEN 1024
 typedef uint8_t tSirVersionString[SIR_VERSION_STRING_LEN];
 
 /* Periodic Tx pattern offload feature */
@@ -126,6 +126,10 @@ typedef uint8_t tSirVersionString[SIR_VERSION_STRING_LEN];
 
 #define SIR_KEK_KEY_LEN 16
 #define SIR_KEK_KEY_LEN_FILS 64
+
+#define SIR_FILS_HLP_OUI_TYPE  "\x5"
+#define SIR_FILS_HLP_OUI_LEN   1
+#define SIR_FILS_HLP_IE_LEN    2048
 
 #define SIR_REPLAY_CTR_LEN 8
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
@@ -514,7 +518,7 @@ struct register_mgmt_frame {
 	bool registerFrame;
 	uint16_t frameType;
 	uint16_t matchLen;
-	uint8_t matchData[1];
+	QDF_FLEX_ARRAY(uint8_t, matchData);
 };
 
 /* / Generic type for sending a response message */
@@ -819,7 +823,7 @@ struct bss_description {
 	uint32_t is_single_pmk;
 #endif
 	/* Please keep the structure 4 bytes aligned above the ieFields */
-	uint32_t ieFields[1];
+	QDF_FLEX_ARRAY(uint32_t, ieFields);
 };
 
 /* / Definition for response message to previously */
@@ -1827,7 +1831,7 @@ typedef struct sSirSmeMgmtFrameInd {
 	uint8_t frameType;
 	int8_t rxRssi;
 	enum rxmgmt_flags rx_flags;
-	uint8_t frameBuf[1];    /* variable */
+	QDF_FLEX_ARRAY(uint8_t, frameBuf);
 } tSirSmeMgmtFrameInd, *tpSirSmeMgmtFrameInd;
 
 typedef void (*sir_mgmt_frame_ind_callback)(tSirSmeMgmtFrameInd *frame_ind);
@@ -1849,7 +1853,7 @@ typedef struct sSirSmeUnprotMgmtFrameInd {
 	uint8_t sessionId;
 	uint8_t frameType;
 	uint8_t frameLen;
-	uint8_t frameBuf[1];    /* variable */
+	QDF_FLEX_ARRAY(uint8_t, frameBuf);
 } tSirSmeUnprotMgmtFrameInd, *tpSirSmeUnprotMgmtFrameInd;
 
 #ifdef WLAN_FEATURE_EXTWOW_SUPPORT
@@ -2169,7 +2173,7 @@ typedef struct sSirUpdateChan {
 	uint8_t vht_24_en;
 	bool he_en;
 	bool eht_en;
-	tSirUpdateChanParam chanParam[1];
+	QDF_FLEX_ARRAY(tSirUpdateChanParam, chanParam);
 } tSirUpdateChanList, *tpSirUpdateChanList;
 
 typedef enum eSirAddonPsReq {
@@ -2909,7 +2913,7 @@ typedef struct {
 
 	uint32_t peer_event_number;
 	/* Variable  length field - Do not add anything after this */
-	uint8_t results[0];
+	uint8_t results[];
 } tSirLLStatsResults, *tpSirLLStatsResults;
 
 #ifdef WLAN_FEATURE_LINK_LAYER_STATS
@@ -3141,7 +3145,7 @@ struct wifi_peer_info {
 		uint32_t power_saving;
 		uint32_t num_rate;
 	};
-	struct wifi_rate_stat rate_stats[0];
+	struct wifi_rate_stat rate_stats[];
 };
 
 /**
@@ -3181,7 +3185,7 @@ struct wifi_interface_stats {
  */
 struct wifi_peer_stat {
 	uint32_t num_peers;
-	struct wifi_peer_info peer_info[0];
+	struct wifi_peer_info peer_info[];
 };
 
 /* wifi statistics bitmap  for getting statistics */
@@ -5197,6 +5201,12 @@ struct sir_sae_info {
  * @vdev_id: vdev id
  * @sae_status: SAE status, 0: Success, Non-zero: Failure.
  * @peer_mac_addr: peer MAC address
+ * @result_code: This carries the reason of the SAE auth failure.
+ *               Currently, SAE authentication failure may happen due to
+ *               1. Authentication failure detected as part of SAE auth frame
+ *                  exchanges and validation.
+ *               2. Deauth received from AP while SAE authentication is in
+ *                  progress.
  */
 struct sir_sae_msg {
 	uint16_t message_type;
@@ -5204,6 +5214,7 @@ struct sir_sae_msg {
 	uint16_t vdev_id;
 	uint8_t sae_status;
 	tSirMacAddr peer_mac_addr;
+	tSirResultCodes result_code;
 };
 
 #ifdef WLAN_FEATURE_MOTION_DETECTION

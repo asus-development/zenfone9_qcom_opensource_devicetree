@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -29,6 +29,8 @@
 #include "wlan_cm_tgt_if_tx_api.h"
 #include "wlan_mlme_public_struct.h"
 #include "wma.h"
+#include "wlan_cm_roam_api.h"
+#include "target_if.h"
 
 static inline
 struct wlan_cm_roam_tx_ops *wlan_cm_roam_get_tx_ops_from_vdev(
@@ -63,9 +65,11 @@ wlan_cm_roam_send_set_vdev_pcl(struct wlan_objmgr_psoc *psoc,
 	struct fw_scan_channels *freq_list;
 	struct wlan_objmgr_vdev *vdev;
 	struct wmi_pcl_chan_weights *weights;
+	struct wlan_objmgr_pdev *pdev;
 	QDF_STATUS status = QDF_STATUS_E_FAILURE;
 	uint32_t band_capability;
 	uint16_t i;
+	bool is_channel_allowed;
 
 	/*
 	 * If vdev_id is WLAN_UMAC_VDEV_ID_MAX, then PDEV pcl command
@@ -85,6 +89,13 @@ wlan_cm_roam_send_set_vdev_pcl(struct wlan_objmgr_psoc *psoc,
 						    WLAN_MLME_SB_ID);
 	if (!vdev) {
 		mlme_err("vdev object is NULL");
+		status = QDF_STATUS_E_FAILURE;
+		return status;
+	}
+
+	pdev = wlan_vdev_get_pdev(vdev);
+	if (!pdev) {
+		mlme_err("pdev object is NULL");
 		status = QDF_STATUS_E_FAILURE;
 		return status;
 	}
@@ -137,6 +148,13 @@ wlan_cm_roam_send_set_vdev_pcl(struct wlan_objmgr_psoc *psoc,
 		    !WLAN_REG_IS_24GHZ_CH_FREQ(weights->saved_chan_list[i]))
 			weights->weighed_valid_list[i] =
 				WEIGHT_OF_DISALLOWED_CHANNELS;
+
+		is_channel_allowed =
+			policy_mgr_is_sta_chan_valid_for_connect_and_roam(
+					pdev, weights->saved_chan_list[i]);
+		if (!is_channel_allowed)
+			weights->weighed_valid_list[i] =
+				WEIGHT_OF_DISALLOWED_CHANNELS;
 	}
 
 	if (QDF_IS_STATUS_ERROR(status)) {
@@ -187,6 +205,131 @@ QDF_STATUS wlan_cm_tgt_send_roam_rt_stats_config(struct wlan_objmgr_psoc *psoc,
 			   req->vdev_id);
 
 	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
+
+	return status;
+}
+
+QDF_STATUS wlan_cm_tgt_send_roam_ho_delay_config(struct wlan_objmgr_psoc *psoc,
+						 uint8_t vdev_id,
+						 uint16_t roam_ho_delay)
+{
+	QDF_STATUS status;
+	struct wlan_cm_roam_tx_ops *roam_tx_ops;
+	struct wlan_objmgr_vdev *vdev;
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, vdev_id,
+						    WLAN_MLME_NB_ID);
+	if (!vdev)
+		return QDF_STATUS_E_INVAL;
+
+	roam_tx_ops = wlan_cm_roam_get_tx_ops_from_vdev(vdev);
+	if (!roam_tx_ops || !roam_tx_ops->send_roam_ho_delay_config) {
+		mlme_err("vdev %d send_roam_ho_delay_config is NULL", vdev_id);
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
+		return QDF_STATUS_E_INVAL;
+	}
+
+	status = roam_tx_ops->send_roam_ho_delay_config(vdev, vdev_id,
+							roam_ho_delay);
+	if (QDF_IS_STATUS_ERROR(status))
+		mlme_debug("vdev %d fail to send roam HO delay config",
+			   vdev_id);
+
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
+
+	return status;
+}
+
+QDF_STATUS
+wlan_cm_tgt_exclude_rm_partial_scan_freq(struct wlan_objmgr_psoc *psoc,
+					 uint8_t vdev_id,
+					 uint8_t exclude_rm_partial_scan_freq)
+{
+	QDF_STATUS status;
+	struct wlan_cm_roam_tx_ops *roam_tx_ops;
+	struct wlan_objmgr_vdev *vdev;
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, vdev_id,
+						    WLAN_MLME_NB_ID);
+	if (!vdev)
+		return QDF_STATUS_E_INVAL;
+
+	roam_tx_ops = wlan_cm_roam_get_tx_ops_from_vdev(vdev);
+	if (!roam_tx_ops || !roam_tx_ops->send_exclude_rm_partial_scan_freq) {
+		mlme_err("vdev %d send_exclude_rm_partial_scan_freq is NULL",
+			 vdev_id);
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
+		return QDF_STATUS_E_INVAL;
+	}
+
+	status = roam_tx_ops->send_exclude_rm_partial_scan_freq(
+					vdev, exclude_rm_partial_scan_freq);
+	if (QDF_IS_STATUS_ERROR(status))
+		mlme_debug("vdev %d fail to exclude roam partial scan freq",
+			   vdev_id);
+
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
+
+	return status;
+}
+
+QDF_STATUS wlan_cm_tgt_send_roam_full_scan_6ghz_on_disc(
+					struct wlan_objmgr_psoc *psoc,
+					uint8_t vdev_id,
+					uint8_t roam_full_scan_6ghz_on_disc)
+{
+	QDF_STATUS status;
+	struct wlan_cm_roam_tx_ops *roam_tx_ops;
+	struct wlan_objmgr_vdev *vdev;
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, vdev_id,
+						    WLAN_MLME_NB_ID);
+	if (!vdev)
+		return QDF_STATUS_E_INVAL;
+
+	roam_tx_ops = wlan_cm_roam_get_tx_ops_from_vdev(vdev);
+	if (!roam_tx_ops || !roam_tx_ops->send_roam_full_scan_6ghz_on_disc) {
+		mlme_err("vdev %d send_roam_full_scan_6ghz_on_disc is NULL",
+			 vdev_id);
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
+		return QDF_STATUS_E_INVAL;
+	}
+
+	status = roam_tx_ops->send_roam_full_scan_6ghz_on_disc(
+					vdev, roam_full_scan_6ghz_on_disc);
+	if (QDF_IS_STATUS_ERROR(status))
+		mlme_debug("vdev %d fail to send inclusion of 6 GHz channels",
+			   vdev_id);
+
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
+
+	return status;
+}
+
+QDF_STATUS
+wlan_cm_tgt_send_roam_scan_offload_rssi_params(
+		struct wlan_objmgr_vdev *vdev,
+		struct wlan_roam_offload_scan_rssi_params *roam_rssi_params)
+{
+	QDF_STATUS status;
+	uint8_t vdev_id;
+	struct wlan_cm_roam_tx_ops *roam_tx_ops;
+
+	vdev_id = wlan_vdev_get_id(vdev);
+
+	roam_tx_ops = wlan_cm_roam_get_tx_ops_from_vdev(vdev);
+	if (!roam_tx_ops || !roam_tx_ops->send_roam_scan_offload_rssi_params) {
+		mlme_err("vdev %d send_roam_scan_offload_rssi_params is NULL",
+			 vdev_id);
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
+		return QDF_STATUS_E_INVAL;
+	}
+
+	status = roam_tx_ops->send_roam_scan_offload_rssi_params(
+						vdev, roam_rssi_params);
+	if (QDF_IS_STATUS_ERROR(status))
+		mlme_debug("vdev %d fail to send roam scan offload RSSI params",
+			   vdev_id);
 
 	return status;
 }
@@ -344,6 +487,37 @@ QDF_STATUS wlan_cm_tgt_send_roam_update_req(struct wlan_objmgr_psoc *psoc,
 	return status;
 }
 
+QDF_STATUS
+wlan_cm_tgt_send_roam_freqs(struct wlan_objmgr_psoc *psoc,
+			    uint8_t vdev_id,
+			    struct wlan_roam_scan_channel_list *req)
+{
+	QDF_STATUS status;
+	struct wlan_cm_roam_tx_ops *roam_tx_ops;
+	struct wlan_objmgr_vdev *vdev;
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, vdev_id,
+						    WLAN_MLME_NB_ID);
+	if (!vdev)
+		return QDF_STATUS_E_INVAL;
+
+	roam_tx_ops = wlan_cm_roam_get_tx_ops_from_vdev(vdev);
+	if (!roam_tx_ops || !roam_tx_ops->send_roam_frequencies) {
+		mlme_err("CM_RSO: vdev %d send_roam_frequencies is NULL",
+			 vdev_id);
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
+		return QDF_STATUS_E_INVAL;
+	}
+
+	status = roam_tx_ops->send_roam_frequencies(vdev, req);
+	if (QDF_IS_STATUS_ERROR(status))
+		mlme_err("CM_RSO: vdev %d fail to send roam freqs", vdev_id);
+
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
+
+	return status;
+}
+
 QDF_STATUS wlan_cm_tgt_send_roam_abort_req(struct wlan_objmgr_psoc *psoc,
 					   uint8_t vdev_id)
 {
@@ -429,6 +603,46 @@ QDF_STATUS wlan_cm_tgt_send_roam_triggers(struct wlan_objmgr_psoc *psoc,
 
 	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
 
+	return status;
+}
+
+QDF_STATUS wlan_cm_tgt_send_idle_params(struct wlan_objmgr_psoc *psoc,
+					uint8_t vdev_id,
+					struct wlan_roam_idle_params *params)
+{
+	struct wlan_cm_roam_tx_ops *roam_tx_ops;
+	struct wlan_objmgr_vdev *vdev;
+	struct wmi_unified *wmi_handle;
+	QDF_STATUS status;
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, vdev_id,
+						    WLAN_MLME_NB_ID);
+	if (!vdev)
+		return QDF_STATUS_E_INVAL;
+
+	roam_tx_ops = wlan_cm_roam_get_tx_ops_from_vdev(vdev);
+	if (!roam_tx_ops || !roam_tx_ops->send_roam_idle_trigger) {
+		mlme_err("CM_RSO: vdev %d send_roam_idle_trigger is NULL",
+			 vdev_id);
+		status = QDF_STATUS_E_INVAL;
+		goto release_ref;
+	}
+
+	wmi_handle = get_wmi_unified_hdl_from_psoc(psoc);
+	if (!wmi_handle) {
+		mlme_debug("Invalid WMI handle");
+		status = QDF_STATUS_E_INVAL;
+		goto release_ref;
+	}
+
+	status = roam_tx_ops->send_roam_idle_trigger(wmi_handle,
+						     ROAM_SCAN_OFFLOAD_UPDATE_CFG,
+						     params);
+	if (QDF_IS_STATUS_ERROR(status))
+		mlme_err("CM_RSO: vdev %d failed to send idle params", vdev_id);
+
+release_ref:
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
 	return status;
 }
 #endif

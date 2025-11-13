@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -458,7 +459,7 @@ int hdd_set_p2p_noa(struct net_device *dev, uint8_t *command)
 {
 	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
 	struct p2p_ps_config noa = {0};
-	int count, duration, interval;
+	int count, duration, interval, start = 0;
 	char *param;
 	int ret;
 
@@ -468,19 +469,25 @@ int hdd_set_p2p_noa(struct net_device *dev, uint8_t *command)
 		return -EINVAL;
 	}
 	param++;
-	ret = sscanf(param, "%d %d %d", &count, &interval, &duration);
-	if (ret != 3) {
+	ret = sscanf(param, "%d %d %d %d", &count, &start, &duration,
+		     &interval);
+	if (ret < 3) {
 		hdd_err("P2P_SET GO noa: fail to read params, ret=%d",
 			ret);
 		return -EINVAL;
 	}
-	if (count < 0 || interval < 0 || duration < 0 ||
-	    interval > MAX_MUS_VAL || duration > MAX_MUS_VAL) {
+
+	if (ret == 3)
+		interval = 100;
+
+	if (start < 0 || count < 0 || interval < 0 || duration < 0 ||
+	    start > MAX_MUS_VAL || interval > MAX_MUS_VAL ||
+	    duration > MAX_MUS_VAL) {
 		hdd_err("Invalid NOA parameters");
 		return -EINVAL;
 	}
-	hdd_debug("P2P_SET GO noa: count=%d interval=%d duration=%d",
-		count, interval, duration);
+	hdd_debug("P2P_SET GO noa: count=%d interval=%d duration=%d start=%d",
+		  count, interval, duration, start);
 	duration = MS_TO_TU_MUS(duration);
 	interval = MS_TO_TU_MUS(interval);
 	/* PS Selection
@@ -504,15 +511,17 @@ int hdd_set_p2p_noa(struct net_device *dev, uint8_t *command)
 		noa.single_noa_duration = 0;
 		noa.ps_selection = P2P_POWER_SAVE_TYPE_PERIODIC_NOA;
 	}
+
+	noa.start = start;
 	noa.interval = interval;
 	noa.count = count;
 	noa.vdev_id = adapter->vdev_id;
 
-	hdd_debug("P2P_PS_ATTR:opp ps %d ct window %d duration %d "
-		  "interval %d count %d single noa duration %d "
-		  "ps selection %x", noa.opp_ps,
-		  noa.ct_window, noa.duration, noa.interval,
-		  noa.count, noa.single_noa_duration, noa.ps_selection);
+	hdd_debug("P2P_PS_ATTR:opp ps %d ct window %d count %d interval %d "
+		  "duration %d start %d single noa duration %d "
+		  "ps selection %x", noa.opp_ps, noa.ct_window, noa.count,
+		  noa.interval, noa.duration, noa.start,
+		  noa.single_noa_duration, noa.ps_selection);
 
 	return wlan_hdd_set_power_save(adapter, &noa);
 }
@@ -719,6 +728,7 @@ struct wireless_dev *__wlan_hdd_add_virtual_intf(struct wiphy *wiphy,
 		break;
 	}
 
+	create_params.is_add_virtual_iface = 1;
 	adapter = hdd_get_adapter(hdd_ctx, QDF_STA_MODE);
 	if (adapter && !wlan_hdd_validate_vdev_id(adapter->vdev_id)) {
 		vdev = hdd_objmgr_get_vdev_by_user(adapter, WLAN_OSIF_P2P_ID);
@@ -777,6 +787,7 @@ struct wireless_dev *__wlan_hdd_add_virtual_intf(struct wiphy *wiphy,
 			hdd_debug("change mode to p2p device");
 			mode = QDF_P2P_DEVICE_MODE;
 		}
+
 		device_address = wlan_hdd_get_intf_addr(hdd_ctx, mode);
 		if (!device_address)
 			return ERR_PTR(-EINVAL);
@@ -790,7 +801,7 @@ struct wireless_dev *__wlan_hdd_add_virtual_intf(struct wiphy *wiphy,
 	}
 
 	if (!adapter) {
-		hdd_err("hdd_open_adapter failed");
+		hdd_err("hdd_open_adapter failed with iftype %d", type);
 		return ERR_PTR(-ENOSPC);
 	}
 
@@ -931,8 +942,8 @@ int __wlan_hdd_del_virtual_intf(struct wiphy *wiphy, struct wireless_dev *wdev)
 
 	if (adapter->device_mode == QDF_SAP_MODE &&
 	    wlan_sap_is_pre_cac_active(hdd_ctx->mac_handle)) {
-		hdd_clean_up_interface(hdd_ctx, adapter);
 		hdd_clean_up_pre_cac_interface(hdd_ctx);
+		hdd_clean_up_interface(hdd_ctx, adapter);
 	} else if (wlan_hdd_is_session_type_monitor(
 					adapter->device_mode) &&
 		   ucfg_pkt_capture_get_mode(hdd_ctx->psoc) !=
@@ -963,6 +974,7 @@ int wlan_hdd_del_virtual_intf(struct wiphy *wiphy, struct wireless_dev *wdev)
 	osif_vdev_sync_unregister(wdev->netdev);
 	osif_vdev_sync_wait_for_ops(vdev_sync);
 
+	adapter->is_virtual_iface = true;
 	errno = __wlan_hdd_del_virtual_intf(wiphy, wdev);
 
 	osif_vdev_sync_trans_stop(vdev_sync);
@@ -1180,11 +1192,12 @@ int wlan_hdd_set_power_save(struct hdd_adapter *adapter,
 		return -EINVAL;
 	}
 
-	hdd_debug("opp ps:%d, ct window:%d, duration:%d, interval:%d, count:%d, single noa duration:%d, ps selection:%d, vdev id:%d",
-		ps_config->opp_ps, ps_config->ct_window,
-		ps_config->duration, ps_config->interval,
-		ps_config->count, ps_config->single_noa_duration,
-		ps_config->ps_selection, ps_config->vdev_id);
+	hdd_debug("opp ps:%d, ct window:%d, duration:%d, interval:%d, count:%d start:%d, single noa duration:%d, ps selection:%d, vdev id:%d",
+		  ps_config->opp_ps, ps_config->ct_window,
+		  ps_config->duration, ps_config->interval,
+		  ps_config->count, ps_config->start,
+		  ps_config->single_noa_duration,
+		  ps_config->ps_selection, ps_config->vdev_id);
 
 	status = ucfg_p2p_set_ps(psoc, ps_config);
 	hdd_debug("p2p set power save, status:%d", status);

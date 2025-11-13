@@ -416,12 +416,6 @@ lim_process_mlm_post_join_suspend_link(struct mac_context *mac_ctx,
 	mac_ctx->lim.lim_timers.gLimJoinFailureTimer.sessionId =
 		session->peSessionId;
 
-	//ASUS_BSP+++
-	pe_info("[wlan]: gLimJoinFailureTimer (%d --> 2000).\n", 
-		(int)(mac_ctx->lim.lim_timers.gLimJoinFailureTimer.initScheduleTimeInMsecs));
-	mac_ctx->lim.lim_timers.gLimJoinFailureTimer.initScheduleTimeInMsecs = 2000;
-	//ASUS_BSP---
-
 	/*
 	 * store the channel switch session_entry in the lim
 	 * global variable
@@ -1694,8 +1688,7 @@ static void lim_handle_sae_auth_timeout(struct mac_context *mac_ctx,
 	}
 
 	if (!sae_retry->sae_auth_max_retry) {
-		if (MLME_IS_ROAMING_IN_PROG(mac_ctx->psoc,
-					    session_entry->vdev_id)) {
+		if (!wlan_cm_is_vdev_connecting(session_entry->vdev)) {
 			mac_hdr = (tpSirMacMgmtHdr)sae_retry->sae_auth.ptr;
 			lim_send_pre_auth_failure(session_entry->vdev_id,
 						  mac_hdr->bssId);

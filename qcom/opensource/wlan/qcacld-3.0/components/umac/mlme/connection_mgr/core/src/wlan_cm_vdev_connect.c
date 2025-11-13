@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2015, 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -997,6 +997,8 @@ void cm_get_sta_cxn_info(struct wlan_objmgr_vdev *vdev,
 #endif
 #endif
 
+#define MGMT_FRAME_FULL_PROTECTION (RSN_CAP_MFP_REQUIRED | RSN_CAP_MFP_CAPABLE)
+
 QDF_STATUS cm_connect_start_ind(struct wlan_objmgr_vdev *vdev,
 				struct wlan_cm_connect_req *req)
 {
@@ -1019,6 +1021,8 @@ QDF_STATUS cm_connect_start_ind(struct wlan_objmgr_vdev *vdev,
 
 	rso_cfg = wlan_cm_get_rso_config(vdev);
 	if (rso_cfg) {
+		uint8_t rso_user_mfp;
+
 		rso_cfg->orig_sec_info.rsn_caps = req->crypto.rsn_caps;
 		rso_cfg->orig_sec_info.authmodeset = req->crypto.auth_type;
 		rso_cfg->orig_sec_info.ucastcipherset =
@@ -1026,6 +1030,19 @@ QDF_STATUS cm_connect_start_ind(struct wlan_objmgr_vdev *vdev,
 		rso_cfg->orig_sec_info.mcastcipherset =
 					req->crypto.group_cipher;
 		rso_cfg->orig_sec_info.key_mgmt = req->crypto.akm_suites;
+
+		/*
+		 * This user configure MFP capability is global and is for
+		 * multiple profiles which can be used by firmware for cross-AKM
+		 * roaming. When user configures MFP required then we should
+		 * set both MFPC and MFPR in RSN caps.
+		 */
+		rso_user_mfp = req->crypto.user_mfp;
+		if (rso_user_mfp == RSN_CAP_MFP_REQUIRED)
+			rso_user_mfp = MGMT_FRAME_FULL_PROTECTION;
+		rso_cfg->rso_rsn_caps = (req->crypto.rsn_caps) &
+					(~MGMT_FRAME_FULL_PROTECTION);
+		rso_cfg->rso_rsn_caps = (rso_cfg->rso_rsn_caps) | rso_user_mfp;
 	}
 
 	if (wlan_get_vendor_ie_ptr_from_oui(HS20_OUI_TYPE,
@@ -1368,7 +1385,7 @@ static void cm_process_connect_complete(struct wlan_objmgr_psoc *psoc,
 	akm = wlan_crypto_get_param(vdev, WLAN_CRYPTO_PARAM_KEY_MGMT);
 	if (QDF_HAS_PARAM(akm, WLAN_CRYPTO_KEY_MGMT_FT_SAE)) {
 		mlme_debug("Update the MDID in PMK cache for FT-SAE case");
-		cm_update_pmk_cache_ft(psoc, vdev_id);
+		cm_update_pmk_cache_ft(psoc, vdev_id, NULL);
 	}
 
 	cm_update_owe_info(vdev, rsp, vdev_id);
@@ -1563,4 +1580,54 @@ bool cm_is_vdevid_active(struct wlan_objmgr_pdev *pdev, uint8_t vdev_id)
 	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_CM_ID);
 
 	return active;
+}
+
+static
+QDF_STATUS cm_handle_hw_mode_change_resp_cb(struct scheduler_msg *msg)
+{
+	struct cm_vdev_hw_mode_rsp *rsp;
+
+	if (!msg || !msg->bodyptr)
+		return QDF_STATUS_E_FAILURE;
+
+	rsp = msg->bodyptr;
+	wlan_cm_hw_mode_change_resp(rsp->pdev, rsp->vdev_id, rsp->cm_id,
+				    rsp->status);
+
+	qdf_mem_free(rsp);
+
+	return QDF_STATUS_SUCCESS;
+}
+
+QDF_STATUS
+wlan_cm_handle_hw_mode_change_resp(struct wlan_objmgr_pdev *pdev,
+				   uint8_t vdev_id,
+				   wlan_cm_id cm_id, QDF_STATUS status)
+{
+	struct cm_vdev_hw_mode_rsp *rsp;
+	struct scheduler_msg rsp_msg = {0};
+	QDF_STATUS qdf_status;
+
+	rsp = qdf_mem_malloc(sizeof(*rsp));
+	if (!rsp)
+		return QDF_STATUS_E_FAILURE;
+
+	rsp->pdev = pdev;
+	rsp->vdev_id = vdev_id;
+	rsp->cm_id = cm_id;
+	rsp->status = status;
+
+	rsp_msg.bodyptr = rsp;
+	rsp_msg.callback = cm_handle_hw_mode_change_resp_cb;
+
+	qdf_status = scheduler_post_message(QDF_MODULE_ID_MLME,
+					    QDF_MODULE_ID_TARGET_IF,
+					    QDF_MODULE_ID_TARGET_IF, &rsp_msg);
+	if (QDF_IS_STATUS_ERROR(qdf_status)) {
+		mlme_err(CM_PREFIX_FMT "Failed to post HW mode change rsp",
+			 CM_PREFIX_REF(vdev_id, cm_id));
+		qdf_mem_free(rsp);
+	}
+
+	return qdf_status;
 }

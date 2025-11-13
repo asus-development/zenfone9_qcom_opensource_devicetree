@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -26,6 +26,7 @@ extern "C" {
 
 /* Header files */
 #include <qdf_status.h>
+#include "qdf_ipa.h"
 #include "qdf_nbuf.h"
 #include "qdf_lro.h"
 #include "ol_if_athvar.h"
@@ -301,6 +302,7 @@ struct qca_napi_data {
  * @enable_runtime_pm: Enable Runtime PM
  * @runtime_pm_delay: Runtime PM Delay
  * @rx_softirq_max_yield_duration_ns: Max Yield time duration for RX Softirq
+ * @enable_ce_dp_irq_affine: Enable affinity for CE DP IRQs
  *
  * Structure for holding HIF ini parameters.
  */
@@ -311,6 +313,9 @@ struct hif_config_info {
 	u_int32_t runtime_pm_delay;
 #endif
 	uint64_t rx_softirq_max_yield_duration_ns;
+#ifdef FEATURE_ENABLE_CE_DP_IRQ_AFFINE
+	bool enable_ce_dp_irq_affine;
+#endif
 };
 
 /**
@@ -526,6 +531,14 @@ static inline void hif_event_history_deinit(struct hif_opaque_softc *hif_ctx,
 {
 }
 #endif /* WLAN_FEATURE_DP_EVENT_HISTORY */
+
+void hif_display_ctrl_traffic_pipes_state(struct hif_opaque_softc *hif_ctx);
+
+#if defined(HIF_CONFIG_SLUB_DEBUG_ON) || defined(HIF_CE_DEBUG_DATA_BUF)
+void hif_display_latest_desc_hist(struct hif_opaque_softc *hif_ctx);
+#else
+static inline void hif_display_latest_desc_hist(struct hif_opaque_softc *hif_ctx) {}
+#endif
 
 /**
  * enum HIF_DEVICE_POWER_CHANGE_TYPE: Device Power change type
@@ -1249,6 +1262,31 @@ void hif_pm_set_link_state(struct hif_opaque_softc *hif_handle, uint8_t val);
  * Return: 1 link is up, 0 link is down
  */
 uint8_t hif_pm_get_link_state(struct hif_opaque_softc *hif_handle);
+
+/**
+ * hif_pm_runtime_set_delay() - Set delay to trigger RTPM suspend
+ * @hif_sc: HIF Context
+ * @delay: delay in ms to be set
+ *
+ * Return: Success if delay is set successfully
+ */
+QDF_STATUS hif_pm_runtime_set_delay(struct hif_opaque_softc *hif_ctx,
+				    int delay);
+
+/**
+ * hif_pm_runtime_restore_delay() - Restore delay value to default value
+ *
+ * Return: Success if reset done. E_ALREADY if delay same as config value
+ */
+QDF_STATUS hif_pm_runtime_restore_delay(struct hif_opaque_softc *hif_ctx);
+
+/**
+ * hif_pm_runtime_get_delay() -Get delay to trigger RTPM suspend
+ *
+ * Return: Delay in ms
+ */
+int hif_pm_runtime_get_delay(struct hif_opaque_softc *hif_ctx);
+
 #else
 struct hif_pm_runtime_lock {
 	const char *name;
@@ -1334,6 +1372,18 @@ void hif_pm_runtime_update_stats(struct hif_opaque_softc *hif_ctx,
 				 wlan_rtpm_dbgid rtpm_dbgid,
 				 enum hif_pm_htc_stats stats)
 {}
+
+static inline
+QDF_STATUS hif_pm_runtime_set_delay(struct hif_opaque_softc *hif_ctx, int delay)
+{ return QDF_STATUS_SUCCESS; }
+
+static inline
+QDF_STATUS hif_pm_runtime_restore_delay(struct hif_opaque_softc *hif_ctx)
+{ return QDF_STATUS_SUCCESS; }
+
+static inline
+int hif_pm_runtime_get_delay(struct hif_opaque_softc *hif_ctx)
+{ return 0; }
 #endif
 
 void hif_enable_power_management(struct hif_opaque_softc *hif_ctx,
@@ -1368,7 +1418,7 @@ enum ipa_hw_type hif_get_ipa_hw_type(void)
 static inline
 bool hif_get_ipa_present(void)
 {
-	if (ipa_uc_reg_rdyCB(NULL) != -EPERM)
+	if (qdf_ipa_uc_reg_rdyCB(NULL) != -EPERM)
 		return true;
 	else
 		return false;
@@ -1791,7 +1841,16 @@ hif_softc_to_hif_opaque_softc(struct hif_softc *hif_handle)
 
 #if defined(HIF_IPCI) && defined(FEATURE_HAL_DELAYED_REG_WRITE)
 QDF_STATUS hif_try_prevent_ep_vote_access(struct hif_opaque_softc *hif_ctx);
-void hif_set_ep_intermediate_vote_access(struct hif_opaque_softc *hif_ctx);
+
+/**
+ * hif_set_ep_intermediate_vote_access() - Set intermediate EP vote access
+ * @hif_ctx: opaque softc handle
+ *
+ * Return: QDF_STATUS of operation
+ */
+QDF_STATUS
+hif_set_ep_intermediate_vote_access(struct hif_opaque_softc *hif_ctx);
+
 void hif_allow_ep_vote_access(struct hif_opaque_softc *hif_ctx);
 void hif_set_ep_vote_access(struct hif_opaque_softc *hif_ctx,
 			    uint8_t type, uint8_t access);
@@ -1804,9 +1863,10 @@ hif_try_prevent_ep_vote_access(struct hif_opaque_softc *hif_ctx)
 	return QDF_STATUS_SUCCESS;
 }
 
-static inline void
+static inline QDF_STATUS
 hif_set_ep_intermediate_vote_access(struct hif_opaque_softc *hif_ctx)
 {
+	return QDF_STATUS_SUCCESS;
 }
 
 static inline void
@@ -1882,7 +1942,8 @@ void hif_log_ce_info(struct hif_softc *scn, uint8_t *data,
 }
 #endif
 
-#ifdef HIF_CPU_PERF_AFFINE_MASK
+#if defined(HIF_CPU_PERF_AFFINE_MASK) || \
+    defined(FEATURE_ENABLE_CE_DP_IRQ_AFFINE)
 /**
  * hif_config_irq_set_perf_affinity_hint() - API to set affinity
  * @hif_ctx: hif opaque handle
@@ -2117,4 +2178,17 @@ void hif_set_grp_intr_affinity(struct hif_opaque_softc *scn,
 {
 }
 #endif
+
+static inline QDF_STATUS
+hif_irq_set_affinity_hint(int irq_num, qdf_cpu_mask *cpu_mask)
+{
+	QDF_STATUS status;
+
+	qdf_dev_modify_irq_status(irq_num, IRQ_NO_BALANCING, 0);
+	status = qdf_dev_set_irq_affinity(irq_num,
+					  (struct qdf_cpu_mask *)cpu_mask);
+	qdf_dev_modify_irq_status(irq_num, 0, IRQ_NO_BALANCING);
+
+	return status;
+}
 #endif /* _HIF_H_ */

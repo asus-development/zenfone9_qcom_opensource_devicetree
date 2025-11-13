@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -321,6 +321,8 @@ static void reg_program_config_vars(struct hdd_context *hdd_ctx,
 						enable_5dot9_ghz_chan;
 	hdd_update_coex_unsafe_chan_nb_user_prefer(hdd_ctx, config_vars);
 	hdd_update_coex_unsafe_chan_reg_disable(hdd_ctx, config_vars);
+	config_vars->sta_sap_scc_on_indoor_channel =
+		ucfg_policy_mgr_get_sta_sap_scc_on_indoor_chnl(hdd_ctx->psoc);
 }
 
 /**
@@ -502,15 +504,19 @@ static void hdd_process_regulatory_data(struct hdd_context *hdd_ctx,
 	struct ieee80211_channel *wiphy_chan, *wiphy_chan_144 = NULL;
 	struct regulatory_channel *cds_chan;
 	uint8_t band_capability, indoor_chnl_marking = 0;
-	bool indoor;
+	bool indoor, sta_sap_con_on_indoor;
 	QDF_STATUS status;
 
 	band_capability = hdd_ctx->curr_band;
 
 	status = ucfg_policy_mgr_get_indoor_chnl_marking(hdd_ctx->psoc,
 							 &indoor_chnl_marking);
+
 	if (QDF_STATUS_SUCCESS != status)
 		hdd_err("can't get indoor channel marking, using default");
+
+	 sta_sap_con_on_indoor =
+		 ucfg_policy_mgr_get_sta_sap_scc_on_indoor_chnl(hdd_ctx->psoc);
 
 	for (band_num = 0; band_num < HDD_NUM_NL80211_BANDS; band_num++) {
 
@@ -565,8 +571,9 @@ static void hdd_process_regulatory_data(struct hdd_context *hdd_ctx,
 					cds_chan->state = CHANNEL_STATE_DFS;
 					wiphy_chan->flags |=
 						IEEE80211_CHAN_PASSIVE_SCAN;
-					cds_chan->chan_flags |=
-						REGULATORY_CHAN_NO_IR;
+					if (!sta_sap_con_on_indoor)
+						cds_chan->chan_flags |=
+							REGULATORY_CHAN_NO_IR;
 				} else
 					cds_chan->state = CHANNEL_STATE_ENABLE;
 			} else
@@ -904,6 +911,7 @@ int hdd_reg_set_band(struct net_device *dev, uint32_t band_bitmap)
 		return -EINVAL;
 	}
 
+	ucfg_cm_set_roam_band_mask(hdd_ctx->psoc, adapter->vdev_id, band_bitmap);
 	status = ucfg_cm_set_roam_band_update(hdd_ctx->psoc, adapter->vdev_id);
 	if (QDF_IS_STATUS_ERROR(status))
 		hdd_err("Failed to send RSO update to fw on set band");

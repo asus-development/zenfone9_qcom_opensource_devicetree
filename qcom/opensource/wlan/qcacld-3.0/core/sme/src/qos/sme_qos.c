@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -3350,8 +3351,7 @@ static QDF_STATUS sme_qos_process_ft_reassoc_req_ev(
 	 */
 	entry = csr_ll_peek_head(&sme_qos_cb.flow_list, false);
 	if (!entry) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_WARN,
-			FL("Flow List empty, nothing to update"));
+		sme_debug("Flow List empty, nothing to update");
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -3809,9 +3809,7 @@ QDF_STATUS sme_qos_process_ft_reassoc_rsp_ev(struct mac_context *mac_ctx,
 				 csr_conn_info->nAssocReqLength +
 				 csr_conn_info->nAssocRspLength));
 
-#ifdef WLAN_FEATURE_ROAM_OFFLOAD
-	if (!MLME_IS_ROAM_SYNCH_IN_PROGRESS(mac_ctx->psoc, sessionid)) {
-#endif
+	if (!wlan_cm_is_roam_sync_in_progress(mac_ctx->psoc, sessionid)) {
 		for (ac = QCA_WLAN_AC_BE; ac < QCA_WLAN_AC_ALL; ac++) {
 			ac_info = &qos_session->ac_info[ac];
 			sme_qos_find_matching_tspec(mac_ctx, sessionid, ac,
@@ -3840,8 +3838,8 @@ QDF_STATUS sme_qos_process_ft_reassoc_rsp_ev(struct mac_context *mac_ctx,
 		} else
 			QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_DEBUG,
 				"LFR3-11r ric_rsplen is zero or ric_data_desc is not present or wmmtspec is not present");
-	}
 #endif
+	}
 
 	/* Send the Aggregated QoS request to HAL */
 	status = sme_qos_ft_aggr_qos_req(mac_ctx, sessionid);
@@ -4033,6 +4031,7 @@ static QDF_STATUS sme_qos_del_ts_req(struct mac_context *mac,
 	struct sme_qos_acinfo *pACInfo;
 	tSirDeltsReq *pMsg;
 	struct sme_qos_wmmtspecinfo *pTspecInfo;
+	struct mac_ts_info tsinfo;
 
 #ifdef FEATURE_WLAN_DIAG_SUPPORT
 	WLAN_HOST_DIAG_EVENT_DEF(qos, host_event_wlan_qos_payload_type);
@@ -4098,6 +4097,8 @@ static QDF_STATUS sme_qos_del_ts_req(struct mac_context *mac,
 		  pTspecInfo->ts_info.up, pTspecInfo->ts_info.tid);
 	qdf_mem_zero(&pACInfo->curr_QoSInfo[tspec_mask - 1],
 		     sizeof(struct sme_qos_wmmtspecinfo));
+	qdf_mem_copy(&tsinfo, &pMsg->req.tspec.tsinfo,
+		     sizeof(struct mac_ts_info));
 
 	if (!QDF_IS_STATUS_SUCCESS(umac_send_mb_message_to_mac(pMsg))) {
 		sme_err("DELTS req to PE failed");
@@ -4111,8 +4112,7 @@ static QDF_STATUS sme_qos_del_ts_req(struct mac_context *mac,
 	WLAN_HOST_DIAG_EVENT_REPORT(&qos, EVENT_WLAN_QOS);
 #endif
 
-	sme_set_tspec_uapsd_mask_per_session(mac, &pMsg->req.tspec.tsinfo,
-					     sessionId);
+	sme_set_tspec_uapsd_mask_per_session(mac, &tsinfo, sessionId);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -4679,9 +4679,7 @@ static QDF_STATUS sme_qos_process_reassoc_success_ev(struct mac_context *mac_ctx
 						mac_ctx, sessionid,
 						event_info);
 			} else {
-				QDF_TRACE(QDF_MODULE_ID_SME,
-					QDF_TRACE_LEVEL_ERROR, FL(
-					"session or RIC data is not present"));
+				sme_debug("session or RIC data is not present");
 			}
 		}
 #ifdef FEATURE_WLAN_ESE
@@ -4806,7 +4804,7 @@ static bool sme_qos_ft_handoff_required(struct mac_context *mac,
 	csr_roam_session = CSR_GET_SESSION(mac, session_id);
 
 	if (csr_roam_session &&
-	    MLME_IS_ROAM_SYNCH_IN_PROGRESS(mac->psoc, session_id) &&
+	    wlan_cm_is_roam_sync_in_progress(mac->psoc, session_id) &&
 	    csr_roam_is_ese_assoc(mac, session_id) &&
 	    csr_roam_session->connectedInfo.nTspecIeLength)
 		return true;
@@ -4879,7 +4877,7 @@ static QDF_STATUS sme_qos_process_handoff_assoc_req_ev(struct mac_context *mac,
 					  __func__, __LINE__);
 				break;
 			}
-			/* fallthrough */
+			fallthrough;
 		case SME_QOS_CLOSED:
 		case SME_QOS_INIT:
 		default:
@@ -6778,7 +6776,7 @@ sme_qos_reassoc_success_ev_fnp(struct mac_context *mac_ctx,
 		break;
 	case SME_QOS_REASON_RELEASE:
 		ac_info->num_flows[SME_QOS_TSPEC_INDEX_0]--;
-	/* fall through */
+		fallthrough;
 	case SME_QOS_REASON_MODIFY:
 		delete_entry = true;
 		break;
@@ -6808,7 +6806,7 @@ sme_qos_reassoc_success_ev_fnp(struct mac_context *mac_ctx,
 		break;
 	case SME_QOS_REASON_REQ_SUCCESS:
 		hdd_status = SME_QOS_STATUS_SETUP_MODIFIED_IND;
-	/* fall through */
+		fallthrough;
 	default:
 		delete_entry = false;
 		break;
@@ -6884,9 +6882,9 @@ static QDF_STATUS sme_qos_add_ts_failure_fnp(struct mac_context *mac, tListElem
 		break;
 	case SME_QOS_REASON_MODIFY:
 		flow_info->reason = SME_QOS_REASON_REQ_SUCCESS;
-		/* fallthrough */
+		fallthrough;
 	case SME_QOS_REASON_REQ_SUCCESS:
-		/* fallthrough */
+		fallthrough;
 	default:
 		inform_hdd = false;
 		break;
@@ -7064,7 +7062,7 @@ static QDF_STATUS sme_qos_add_ts_success_fnp(struct mac_context *mac_ctx,
 	case SME_QOS_REASON_REQ_SUCCESS:
 		hdd_status = SME_QOS_STATUS_SETUP_MODIFIED_IND;
 		inform_hdd = true;
-	/* fallthrough */
+		fallthrough;
 	default:
 		delete_entry = false;
 		break;

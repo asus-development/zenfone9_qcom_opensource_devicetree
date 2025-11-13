@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -166,9 +166,7 @@ u8 ccp_rsn_oui_13[HDD_RSN_OUI_SIZE] = {0x50, 0x6F, 0x9A, 0x01};
 #define ASSOC_RSP_IES_OFFSET 6  /* Capability(2) + AID(2) + Status Code(2) */
 #define ASSOC_REQ_IES_OFFSET 4  /* Capability(2) + LI(2) */
 
-#define HDD_PEER_AUTHORIZE_WAIT 10
-
-/**
+/*
  * beacon_filter_table - table of IEs used for beacon filtering
  */
 static const int beacon_filter_table[] = {
@@ -386,17 +384,6 @@ struct hdd_adapter *hdd_get_sta_connection_in_progress(
 		    (QDF_P2P_DEVICE_MODE == adapter->device_mode)) {
 			if (hdd_cm_is_connecting(adapter)) {
 				hdd_debug("vdev_id %d: Connection is in progress",
-					  adapter->vdev_id);
-				hdd_adapter_dev_put_debug(adapter, dbgid);
-				if (next_adapter)
-					hdd_adapter_dev_put_debug(next_adapter,
-								  dbgid);
-				return adapter;
-			} else if (hdd_cm_is_vdev_associated(adapter) &&
-				   sme_is_sta_key_exchange_in_progress(
-							hdd_ctx->mac_handle,
-							adapter->vdev_id)) {
-				hdd_debug("vdev_id %d: Key exchange is in progress",
 					  adapter->vdev_id);
 				hdd_adapter_dev_put_debug(adapter, dbgid);
 				if (next_adapter)
@@ -839,6 +826,9 @@ void hdd_copy_ht_operation(struct hdd_station_ctx *hdd_sta_ctx,
 		hdd_ht_ops->operation_mode |=
 			IEEE80211_HT_OP_MODE_NON_HT_STA_PRSNT;
 
+	if (ht_ops->chan_center_freq_seg2)
+		hdd_ht_ops->operation_mode |=
+			(ht_ops->chan_center_freq_seg2 << IEEE80211_HT_OP_MODE_CCFS2_SHIFT);
 	/* stbc_param */
 	temp_ht_ops = ht_ops->basicSTBCMCS &
 			HT_STBC_PARAM_MCS;
@@ -998,7 +988,7 @@ void hdd_copy_he_operation(struct hdd_station_ctx *hdd_sta_ctx,
 
 bool hdd_is_roam_sync_in_progress(struct hdd_context *hdd_ctx, uint8_t vdev_id)
 {
-	return MLME_IS_ROAM_SYNCH_IN_PROGRESS(hdd_ctx->psoc, vdev_id);
+	return wlan_cm_is_roam_sync_in_progress(hdd_ctx->psoc, vdev_id);
 }
 
 void hdd_conn_remove_connect_info(struct hdd_station_ctx *sta_ctx)
@@ -1036,39 +1026,10 @@ void hdd_clear_roam_profile_ie(struct hdd_adapter *adapter)
 	hdd_exit();
 }
 
-/**
- * hdd_set_peer_authorized_event() - set peer_authorized_event
- * @vdev_id: vdevid
- *
- * Return: None
- */
-static void hdd_set_peer_authorized_event(uint32_t vdev_id)
-{
-	struct hdd_context *hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
-	struct hdd_adapter *adapter = NULL;
-
-	if (!hdd_ctx)
-		return;
-
-	adapter = hdd_get_adapter_by_vdev(hdd_ctx, vdev_id);
-	if (!adapter) {
-		hdd_err("Invalid vdev_id");
-		return;
-	}
-	complete(&adapter->sta_authorized_event);
-}
-
 #if defined(QCA_LL_LEGACY_TX_FLOW_CONTROL) || defined(QCA_LL_TX_FLOW_CONTROL_V2)
 static inline
 void hdd_set_unpause_queue(void *soc, struct hdd_adapter *adapter)
 {
-	unsigned long rc;
-	/* wait for event from firmware to set the event */
-	rc = wait_for_completion_timeout(
-			&adapter->sta_authorized_event,
-			msecs_to_jiffies(HDD_PEER_AUTHORIZE_WAIT));
-	if (!rc)
-		hdd_debug("timeout waiting for sta_authorized_event");
 
 	cdp_fc_vdev_unpause(soc, adapter->vdev_id,
 			    OL_TXQ_PAUSE_REASON_PEER_UNAUTHORIZED,
@@ -1136,15 +1097,9 @@ QDF_STATUS hdd_change_peer_state(struct hdd_adapter *adapter,
 		/* Reset scan reject params on successful set key */
 		hdd_debug("Reset scan reject params");
 		hdd_init_scan_reject_params(adapter->hdd_ctx);
-#ifdef QCA_LL_LEGACY_TX_FLOW_CONTROL
-		/* make sure event is reset */
-		INIT_COMPLETION(adapter->sta_authorized_event);
-#endif
 
-		err = sme_set_peer_authorized(
-				peer_mac,
-				hdd_set_peer_authorized_event,
-				adapter->vdev_id);
+		err = sme_set_peer_authorized(peer_mac,
+					      adapter->vdev_id);
 		if (err != QDF_STATUS_SUCCESS) {
 			hdd_err("Failed to set the peer state to authorized");
 			return QDF_STATUS_E_FAULT;
@@ -1227,6 +1182,8 @@ QDF_STATUS hdd_roam_register_sta(struct hdd_adapter *adapter,
 	struct ol_txrx_desc_type txrx_desc = {0};
 	struct ol_txrx_ops txrx_ops;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
+	enum phy_ch_width ch_width;
+	enum wlan_phymode phymode;
 
 	/* Get the Station ID from the one saved during the association */
 	if (!QDF_IS_ADDR_BROADCAST(bssid->bytes))
@@ -1285,6 +1242,16 @@ QDF_STATUS hdd_roam_register_sta(struct hdd_adapter *adapter,
 	}
 
 	adapter->tx_fn = txrx_ops.tx.tx;
+
+	if (adapter->device_mode == QDF_NDI_MODE) {
+		phymode = ucfg_mlme_get_vdev_phy_mode(adapter->hdd_ctx->psoc,
+						      adapter->vdev_id);
+		ch_width = ucfg_mlme_get_ch_width_from_phymode(phymode);
+	} else {
+		ch_width = ucfg_mlme_get_peer_ch_width(adapter->hdd_ctx->psoc,
+						txrx_desc.peer_addr.bytes);
+	}
+	txrx_desc.bw = hdd_convert_ch_width_to_cdp_peer_bw(ch_width);
 	qdf_status = cdp_peer_register(soc, OL_TXRX_PDEV_ID, &txrx_desc);
 	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
 		hdd_err("cdp_peer_register() failed Status: %d [0x%08X]",
@@ -1543,6 +1510,7 @@ QDF_STATUS hdd_roam_register_tdlssta(struct hdd_adapter *adapter,
 	struct ol_txrx_desc_type txrx_desc = { 0 };
 	struct ol_txrx_ops txrx_ops;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
+	enum phy_ch_width ch_width;
 
 	/*
 	 * TDLS sta in BSS should be set as STA type TDLS and STA MAC should
@@ -1587,7 +1555,9 @@ QDF_STATUS hdd_roam_register_tdlssta(struct hdd_adapter *adapter,
 
 	adapter->tx_fn = txrx_ops.tx.tx;
 
-
+	ch_width = ucfg_mlme_get_peer_ch_width(adapter->hdd_ctx->psoc,
+					       txrx_desc.peer_addr.bytes);
+	txrx_desc.bw = hdd_convert_ch_width_to_cdp_peer_bw(ch_width);
 	/* Register the Station with TL...  */
 	qdf_status = cdp_peer_register(soc, OL_TXRX_PDEV_ID, &txrx_desc);
 	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
@@ -2391,6 +2361,35 @@ hdd_translate_wpa_to_csr_encryption_type(uint8_t cipher_suite[4])
 	return cipher_type;
 }
 
+enum cdp_peer_bw
+hdd_convert_ch_width_to_cdp_peer_bw(enum phy_ch_width ch_width)
+{
+	switch (ch_width) {
+	case CH_WIDTH_20MHZ:
+		return CDP_20_MHZ;
+	case CH_WIDTH_40MHZ:
+		return CDP_40_MHZ;
+	case CH_WIDTH_80MHZ:
+		return CDP_80_MHZ;
+	case CH_WIDTH_160MHZ:
+		return CDP_160_MHZ;
+	case CH_WIDTH_80P80MHZ:
+		return CDP_80P80_MHZ;
+	case CH_WIDTH_5MHZ:
+		return CDP_5_MHZ;
+	case CH_WIDTH_10MHZ:
+		return CDP_10_MHZ;
+#ifdef WLAN_FEATURE_11BE
+	case CH_WIDTH_320MHZ:
+		return CDP_320_MHZ;
+#endif
+	default:
+		return CDP_BW_INVALID;
+	}
+
+	return CDP_BW_INVALID;
+}
+
 #ifdef WLAN_FEATURE_FILS_SK
 bool hdd_is_fils_connection(struct hdd_context *hdd_ctx,
 			    struct hdd_adapter *adapter)
@@ -2452,6 +2451,9 @@ struct osif_cm_ops osif_ops = {
 	.netif_queue_control_cb = hdd_cm_netif_queue_control,
 	.napi_serialize_control_cb = hdd_cm_napi_serialize_control,
 	.save_gtk_cb = hdd_cm_save_gtk,
+#ifdef WLAN_FEATURE_ROAM_OFFLOAD
+	.roam_rt_stats_event_cb = wlan_hdd_cfg80211_roam_events_callback,
+#endif
 #ifdef WLAN_FEATURE_FILS_SK
 	.set_hlp_data_cb = hdd_cm_set_hlp_data,
 #endif
@@ -2460,6 +2462,9 @@ struct osif_cm_ops osif_ops = {
 #ifdef FEATURE_WLAN_ESE
 	.cckm_preauth_complete_cb = hdd_cm_cckm_preauth_complete,
 #endif
+#endif
+#ifdef WLAN_BOOST_CPU_FREQ_IN_ROAM
+	.perfd_set_cpufreq_cb = hdd_cm_perfd_set_cpufreq,
 #endif
 };
 

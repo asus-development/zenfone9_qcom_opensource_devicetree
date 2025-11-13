@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1221,8 +1221,8 @@ static bool lim_process_assoc_req_no_sta_ctx(struct mac_context *mac_ctx,
 		 * Maximum number of STAs that AP can handle reached.
 		 * Send Association response to peer MAC entity
 		 */
-		pe_err("Max Sta count reached : %d",
-				mac_ctx->lim.maxStation);
+		pe_info_rl("Max Sta count reached : %d",
+			   mac_ctx->lim.maxStation);
 		lim_reject_association(mac_ctx, sa, sub_type, false,
 				       (tAniAuthType)0, 0, false,
 				       STATUS_UNSPECIFIED_FAILURE,
@@ -1879,6 +1879,8 @@ static bool lim_update_sta_ds(struct mac_context *mac_ctx, tSirMacAddr sa,
 	if (sta_ds->rmfEnabled) {
 		sta_ds->ocv_enabled = lim_is_ocv_enable_in_assoc_req(mac_ctx,
 								     assoc_req);
+		if (sta_ds->ocv_enabled)
+			sta_ds->last_ocv_done_freq = session->curr_op_freq;
 		/* Try to delete it before, creating.*/
 		lim_delete_pmf_query_timer(sta_ds);
 		if (tx_timer_create(mac_ctx, &sta_ds->pmfSaQueryTimer,
@@ -2021,20 +2023,14 @@ static bool lim_update_sta_ctx(struct mac_context *mac_ctx, struct pe_session *s
 
 void lim_process_assoc_cleanup(struct mac_context *mac_ctx,
 			       struct pe_session *session,
-			       tpSirAssocReq assoc_req,
 			       tpDphHashNode sta_ds,
 			       bool assoc_req_copied)
 {
 	tpSirAssocReq tmp_assoc_req;
 
-	if (assoc_req) {
-		lim_free_assoc_req_frm_buf(assoc_req);
-
-		qdf_mem_free(assoc_req);
-		/* to avoid double free */
-		if (assoc_req_copied && session->parsedAssocReq && sta_ds)
-			session->parsedAssocReq[sta_ds->assocId] = NULL;
-	}
+	/* to avoid double free */
+	if (assoc_req_copied && session->parsedAssocReq && sta_ds)
+		session->parsedAssocReq[sta_ds->assocId] = NULL;
 
 	/* If it is not duplicate Assoc request then only make to Null */
 	if ((sta_ds) &&
@@ -2090,9 +2086,10 @@ static void lim_defer_sme_indication(struct mac_context *mac_ctx,
 		pe_debug("Free the cached assoc req as a new one is received");
 		cached_req = &sta_pre_auth_ctx->assoc_req;
 		lim_process_assoc_cleanup(mac_ctx, session,
-					  cached_req->assoc_req,
 					  cached_req->sta_ds,
 					  cached_req->assoc_req_copied);
+		lim_free_assoc_req_frm_buf(cached_req->assoc_req);
+		qdf_mem_free(cached_req->assoc_req);
 	}
 
 	sta_pre_auth_ctx->assoc_req.present = true;
@@ -2182,7 +2179,8 @@ bool lim_send_assoc_ind_to_sme(struct mac_context *mac_ctx,
 	if (wlan_vdev_mlme_is_mlo_ap(session->vdev) &&
 	    assoc_req->eht_cap.present &&
 	    IS_DOT11_MODE_EHT(session->dot11mode) &&
-	    (partner_peer_idx || assoc_req->mlo_info.num_partner_links))
+	    (partner_peer_idx ||
+	     !qdf_is_macaddr_zero((struct qdf_mac_addr *)assoc_req->mld_mac)))
 		peer_idx = lim_assign_mlo_conn_idx(mac_ctx, session,
 						   partner_peer_idx);
 	else
@@ -2527,8 +2525,7 @@ QDF_STATUS lim_proc_assoc_req_frm_cmn(struct mac_context *mac_ctx,
 	return QDF_STATUS_SUCCESS;
 
 error:
-	lim_process_assoc_cleanup(mac_ctx, session, assoc_req, sta_ds,
-				  assoc_req_copied);
+	lim_process_assoc_cleanup(mac_ctx, session, sta_ds, assoc_req_copied);
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -2557,6 +2554,7 @@ void lim_process_assoc_req_frame(struct mac_context *mac_ctx,
 	tpDphHashNode sta_ds = NULL;
 	struct wlan_objmgr_vdev *vdev;
 	tpSirAssocReq assoc_req;
+	QDF_STATUS status;
 
 	hdr = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
 	frame_len = WMA_GET_RX_PAYLOAD_LEN(rx_pkt_info);
@@ -2676,8 +2674,10 @@ void lim_process_assoc_req_frame(struct mac_context *mac_ctx,
 					 frame_len))
 		goto error;
 
-	lim_proc_assoc_req_frm_cmn(mac_ctx, sub_type, session, hdr->sa,
-				   assoc_req, 0);
+	status = lim_proc_assoc_req_frm_cmn(mac_ctx, sub_type, session, hdr->sa,
+					    assoc_req, 0);
+	if (QDF_IS_STATUS_ERROR(status))
+		goto error;
 
 	return;
 error:

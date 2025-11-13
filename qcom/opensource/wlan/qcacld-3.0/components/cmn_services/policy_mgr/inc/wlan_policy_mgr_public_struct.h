@@ -966,7 +966,6 @@ enum policy_mgr_band {
 /**
  * enum policy_mgr_conn_update_reason: Reason for conc connection update
  * @POLICY_MGR_UPDATE_REASON_SET_OPER_CHAN: Set probable operating channel
- * @POLICY_MGR_UPDATE_REASON_UT: Unit test related
  * @POLICY_MGR_UPDATE_REASON_START_AP: Start AP
  * @POLICY_MGR_UPDATE_REASON_NORMAL_STA: Connection to Normal STA
  * @POLICY_MGR_UPDATE_REASON_OPPORTUNISTIC: Opportunistic HW mode update
@@ -984,7 +983,6 @@ enum policy_mgr_band {
  */
 enum policy_mgr_conn_update_reason {
 	POLICY_MGR_UPDATE_REASON_SET_OPER_CHAN,
-	POLICY_MGR_UPDATE_REASON_UT,
 	POLICY_MGR_UPDATE_REASON_START_AP,
 	POLICY_MGR_UPDATE_REASON_NORMAL_STA,
 	POLICY_MGR_UPDATE_REASON_OPPORTUNISTIC,
@@ -1423,6 +1421,26 @@ struct go_plus_go_force_scc {
 struct sta_ap_intf_check_work_ctx {
 	struct wlan_objmgr_psoc *psoc;
 	struct go_plus_go_force_scc go_plus_go_force_scc;
+};
+
+/**
+ * enum indoor_conc_update_type - Indoor concurrency update type
+ * @CONNECT - On a new STA connection
+ * @DISCONNECT_WITHOUT_CONCURRENCY - On a STA disconnection with no active
+ * sessions on the same frequency
+ * @DISCONNECT_WITH_CONCURRENCY - On a STA disconnection with an active
+ * session on the same frequency
+ * @SWITCH_WITH_CONCURRENCY - On a STA roam or CSA to a different channel
+ * with a concurrent SAP on previous frequency
+ * @SWITCH_WITHOUT_CONCURRENCY - On a STA roam or CSA to a different channel
+ * without any concurrent SAP on previous frequency
+ */
+enum indoor_conc_update_type {
+	CONNECT,
+	DISCONNECT_WITHOUT_CONCURRENCY,
+	DISCONNECT_WITH_CONCURRENCY,
+	SWITCH_WITHOUT_CONCURRENCY,
+	SWITCH_WITH_CONCURRENCY,
 };
 
 #endif /* __WLAN_POLICY_MGR_PUBLIC_STRUCT_H */

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022,2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -999,10 +999,13 @@ QDF_STATUS cds_dp_open(struct wlan_objmgr_psoc *psoc)
 
 	cds_debug("CDS successfully Opened");
 
-	if (cdp_cfg_get(gp_cds_context->dp_soc, cfg_dp_force_gro_enable))
-		hdd_ctx->dp_agg_param.force_gro_enable = true;
+	if (cdp_cfg_get(gp_cds_context->dp_soc, cfg_dp_tc_based_dyn_gro_enable))
+		hdd_ctx->dp_agg_param.tc_based_dyn_gro = true;
 	else
-		hdd_ctx->dp_agg_param.force_gro_enable = false;
+		hdd_ctx->dp_agg_param.tc_based_dyn_gro = false;
+
+	hdd_ctx->dp_agg_param.tc_ingress_prio =
+		    cdp_cfg_get(gp_cds_context->dp_soc, cfg_dp_tc_ingress_prio);
 
 	return 0;
 
@@ -1331,9 +1334,13 @@ QDF_STATUS cds_post_disable(void)
 
 	/* flush any unprocessed scheduler messages */
 	sched_ctx = scheduler_get_context();
-	if (sched_ctx)
-		scheduler_queues_flush(sched_ctx);
-
+	if (sched_ctx) {
+		qdf_status = scheduler_disable();
+		if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
+			cds_err("Failed to disable scheduler");
+			return QDF_STATUS_E_INVAL;
+		}
+	}
 	/*
 	 * With new state machine changes cds_close can be invoked without
 	 * cds_disable. So, send the following clean up prerequisites to fw,
@@ -1384,11 +1391,6 @@ QDF_STATUS cds_close(struct wlan_objmgr_psoc *psoc)
 	QDF_ASSERT(QDF_IS_STATUS_SUCCESS(qdf_status));
 	if (QDF_IS_STATUS_ERROR(qdf_status))
 		cds_err("Failed to close CDS Scheduler");
-
-	qdf_status = dispatcher_disable();
-	QDF_ASSERT(QDF_IS_STATUS_SUCCESS(qdf_status));
-	if (QDF_IS_STATUS_ERROR(qdf_status))
-		cds_err("Failed to disable dispatcher; status:%d", qdf_status);
 
 	dispatcher_psoc_close(psoc);
 
@@ -2895,8 +2897,9 @@ QDF_STATUS cds_smmu_mem_map_setup(qdf_device_t osdev, bool ipa_present)
 	domain = pld_smmu_get_domain(osdev->dev);
 	if (domain) {
 		int attr = 0;
-		int errno = iommu_domain_get_attr(domain,
-						  DOMAIN_ATTR_S1_BYPASS, &attr);
+		int errno = qdf_iommu_domain_get_attr(domain,
+						      QDF_DOMAIN_ATTR_S1_BYPASS,
+						      &attr);
 
 		wlan_smmu_enabled = !errno && !attr;
 	} else {
@@ -2942,8 +2945,9 @@ QDF_STATUS cds_smmu_mem_map_setup(qdf_device_t osdev, bool ipa_present)
 	mapping = pld_smmu_get_mapping(osdev->dev);
 	if (mapping) {
 		int attr = 0;
-		int errno = iommu_domain_get_attr(mapping->domain,
-						  DOMAIN_ATTR_S1_BYPASS, &attr);
+		int errno = qdf_iommu_domain_get_attr(mapping->domain,
+						      QDF_DOMAIN_ATTR_S1_BYPASS,
+						      &attr);
 
 		wlan_smmu_enabled = !errno && !attr;
 	} else {

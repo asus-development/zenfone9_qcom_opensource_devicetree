@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -44,7 +45,7 @@ void debug_dump_bytes(uint8_t *buffer, uint16_t length, char *pDescription)
 		if (count == 16) {
 			count = 0;
 			offset = 0;
-			A_SNPRINTF(byteOffsetStr, sizeof(byteOffset), "%4.4X",
+			A_SNPRINTF(byteOffsetStr, sizeof(byteOffsetStr), "%4.4X",
 				   byteOffset);
 			A_PRINTF("[%s]: %s\n", byteOffsetStr, stream);
 			qdf_mem_zero(stream, 60);
@@ -53,7 +54,7 @@ void debug_dump_bytes(uint8_t *buffer, uint16_t length, char *pDescription)
 	}
 
 	if (offset != 0) {
-		A_SNPRINTF(byteOffsetStr, sizeof(byteOffset), "%4.4X",
+		A_SNPRINTF(byteOffsetStr, sizeof(byteOffsetStr), "%4.4X",
 			   byteOffset);
 		A_PRINTF("[%s]: %s\n", byteOffsetStr, stream);
 	}
@@ -394,6 +395,7 @@ QDF_STATUS htc_rx_completion_handler(void *Context, qdf_nbuf_t netbuf,
 			uint16_t message_id;
 			HTC_UNKNOWN_MSG *htc_msg;
 			bool wow_nack;
+			uint16_t reason_code;
 
 			/* remove HTC header */
 			qdf_nbuf_pull_head(netbuf, HTC_HDR_LENGTH);
@@ -451,24 +453,28 @@ QDF_STATUS htc_rx_completion_handler(void *Context, qdf_nbuf_t netbuf,
 #endif
 			case HTC_MSG_SEND_SUSPEND_COMPLETE:
 				wow_nack = false;
+				reason_code = 0;
 				htc_credit_record(HTC_SUSPEND_ACK,
 					pEndpoint->TxCredits,
 					HTC_PACKET_QUEUE_DEPTH(
 					&pEndpoint->TxQueue));
 				target->HTCInitInfo.TargetSendSuspendComplete(
 					target->HTCInitInfo.target_psoc,
-					wow_nack);
+					wow_nack, reason_code);
 
 				break;
 			case HTC_MSG_NACK_SUSPEND:
 				wow_nack = true;
+				reason_code = HTC_GET_FIELD(htc_msg,
+							    HTC_UNKNOWN_MSG,
+							    METADATA);
 				htc_credit_record(HTC_SUSPEND_ACK,
 					pEndpoint->TxCredits,
 					HTC_PACKET_QUEUE_DEPTH(
 					&pEndpoint->TxQueue));
 				target->HTCInitInfo.TargetSendSuspendComplete(
 					target->HTCInitInfo.target_psoc,
-					wow_nack);
+					wow_nack, reason_code);
 				break;
 			}
 

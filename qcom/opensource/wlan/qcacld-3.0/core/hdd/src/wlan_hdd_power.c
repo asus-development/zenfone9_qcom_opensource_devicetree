@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -105,8 +105,6 @@ void hdd_wlan_suspend_resume_event(uint8_t state)
 {
 	WLAN_HOST_DIAG_EVENT_DEF(suspend_state, struct host_event_suspend);
 	qdf_mem_zero(&suspend_state, sizeof(suspend_state));
-
-	hdd_info("%s: suspend_state is %d", __func__, state);
 
 	suspend_state.state = state;
 	WLAN_HOST_DIAG_EVENT_REPORT(&suspend_state, EVENT_WLAN_SUSPEND_RESUME);
@@ -1189,10 +1187,10 @@ int wlan_hdd_ipv4_changed(struct notifier_block *nb,
  * CPU can enter CXPC mode.
  * The vote value is in microseconds.
  */
-#define HDD_CPU_CXPC_THRESHOLD (10000)
-static bool wlan_hdd_is_cpu_cxpc_allowed(unsigned long vote)
+static bool wlan_hdd_is_cpu_cxpc_allowed(struct hdd_context *hdd_ctx,
+					 unsigned long vote)
 {
-	if (vote >= HDD_CPU_CXPC_THRESHOLD)
+	if (vote >= hdd_ctx->config->cpu_cxpc_threshold)
 		return true;
 	else
 		return false;
@@ -1224,11 +1222,11 @@ int wlan_hdd_pm_qos_notify(struct notifier_block *nb, unsigned long curr_val,
 
 	if (!hdd_ctx->runtime_pm_prevented &&
 	    is_any_sta_connected &&
-	    !wlan_hdd_is_cpu_cxpc_allowed(curr_val)) {
+	    !wlan_hdd_is_cpu_cxpc_allowed(hdd_ctx, curr_val)) {
 		hif_pm_runtime_get_noresume(hif_ctx, RTPM_ID_QOS_NOTIFY);
 		hdd_ctx->runtime_pm_prevented = true;
 	} else if (hdd_ctx->runtime_pm_prevented &&
-		   wlan_hdd_is_cpu_cxpc_allowed(curr_val)) {
+		   wlan_hdd_is_cpu_cxpc_allowed(hdd_ctx, curr_val)) {
 		hif_pm_runtime_put(hif_ctx, RTPM_ID_QOS_NOTIFY);
 		hdd_ctx->runtime_pm_prevented = false;
 	}
@@ -1258,7 +1256,7 @@ bool wlan_hdd_is_cpu_pm_qos_in_progress(struct hdd_context *hdd_ctx)
 	curr_val_ns = cpuidle_governor_latency_req(max_cpu_num);
 	curr_val_us = curr_val_ns / NSEC_PER_USEC;
 	hdd_debug("PM QoS current value: %lld", curr_val_us);
-	if (!wlan_hdd_is_cpu_cxpc_allowed(curr_val_us))
+	if (!wlan_hdd_is_cpu_cxpc_allowed(hdd_ctx, curr_val_us))
 		return true;
 	else
 		return false;
@@ -1654,7 +1652,7 @@ hdd_suspend_wlan(void)
 	struct hdd_adapter *adapter = NULL, *next_adapter = NULL;
 	uint32_t conn_state_mask = 0;
 
-	hdd_info("[wlan]: hdd_suspend_wlan +. WLAN being suspended by OS");
+	hdd_info("WLAN being suspended by OS");
 
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 	if (!hdd_ctx)
@@ -1690,17 +1688,21 @@ hdd_suspend_wlan(void)
 		hdd_adapter_dev_put_debug(adapter, NET_DEV_HOLD_SUSPEND_WLAN);
 	}
 
+	hdd_ctx->hdd_wlan_suspend_in_progress = true;
+
 	status = ucfg_pmo_psoc_user_space_suspend_req(hdd_ctx->psoc,
 						      QDF_SYSTEM_SUSPEND);
-	if (status != QDF_STATUS_SUCCESS)
+	if (status != QDF_STATUS_SUCCESS) {
+		hdd_ctx->hdd_wlan_suspend_in_progress = false;
 		return -EAGAIN;
+	}
 
 	hdd_ctx->hdd_wlan_suspended = true;
+	hdd_ctx->hdd_wlan_suspend_in_progress = false;
 
 	hdd_configure_sar_sleep_index(hdd_ctx);
 
 	hdd_wlan_suspend_resume_event(HDD_WLAN_EARLY_SUSPEND);
-	hdd_info("[wlan]: hdd_suspend_wlan -.");
 
 	return 0;
 }
@@ -1716,7 +1718,7 @@ static int hdd_resume_wlan(void)
 	struct hdd_adapter *adapter, *next_adapter = NULL;
 	QDF_STATUS status;
 
-	hdd_info("[wlan]: hdd_resumed_wlan +. WLAN being resumed by OS");
+	hdd_info("WLAN being resumed by OS");
 
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 	if (!hdd_ctx)
@@ -1764,7 +1766,6 @@ static int hdd_resume_wlan(void)
 
 	hdd_configure_sar_resume_index(hdd_ctx);
 
-	hdd_info("[wlan]: hdd_resumed_wlan -.");
 	return 0;
 }
 
@@ -1795,7 +1796,9 @@ static void hdd_ssr_restart_sap(struct hdd_context *hdd_ctx)
 					   NET_DEV_HOLD_SSR_RESTART_SAP) {
 		if (adapter->device_mode == QDF_SAP_MODE) {
 			if (test_bit(SOFTAP_INIT_DONE, &adapter->event_flags)) {
-				hdd_debug("Restart prev SAP session");
+				hdd_debug(
+				"Restart prev SAP session, event_flags 0x%lx(%s)",
+				adapter->event_flags, (adapter->dev)->name);
 				wlan_hdd_start_sap(adapter, true);
 			}
 		}
@@ -1813,7 +1816,7 @@ QDF_STATUS hdd_wlan_shutdown(void)
 	struct wlan_objmgr_vdev *vdev;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 
-	hdd_info("[wlan]: hdd_wlan_shutdown +. WLAN driver shutting down!");
+	hdd_info("WLAN driver shutting down!");
 
 	/* Get the HDD context. */
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
@@ -1887,7 +1890,6 @@ QDF_STATUS hdd_wlan_shutdown(void)
 	qdf_set_smmu_fault_state(false);
 	hdd_info("WLAN driver shutdown complete");
 
-	hdd_info("[wlan]: hdd_wlan_shutdown -.");
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -2490,8 +2492,12 @@ static int __wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 	}
 
 	rc = wlan_hdd_validate_context(hdd_ctx);
-	if (0 != rc)
-		return rc;
+	if (0 != rc) {
+		if (pld_is_low_power_mode(hdd_ctx->parent_dev))
+			hdd_debug("low power mode (Deep Sleep/Hibernate)");
+		else
+			return rc;
+	}
 
 	if (ucfg_pmo_get_suspend_mode(hdd_ctx->psoc) == PMO_SUSPEND_NONE) {
 		hdd_info_rl("Suspend is not supported");
@@ -2736,8 +2742,12 @@ static int _wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 	}
 
 	errno = wlan_hdd_validate_context(hdd_ctx);
-	if (errno)
-		return errno;
+	if (0 != errno) {
+		if (pld_is_low_power_mode(hdd_ctx->parent_dev))
+			hdd_debug("low power mode (Deep Sleep/Hibernate)");
+		else
+			return errno;
+	}
 
 	hif_ctx = cds_get_context(QDF_MODULE_ID_HIF);
 	if (!hif_ctx)
@@ -2764,8 +2774,12 @@ int wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 	struct hdd_context *hdd_ctx = wiphy_priv(wiphy);
 
 	errno = wlan_hdd_validate_context(hdd_ctx);
-	if (0 != errno)
-		return errno;
+	if (0 != errno) {
+		if (pld_is_low_power_mode(hdd_ctx->parent_dev))
+			hdd_debug("low power mode (Deep Sleep/Hibernate)");
+		else
+			return errno;
+	}
 
 	/*
 	 * Flush the idle shutdown before ops start.This is done here to avoid
@@ -2998,7 +3012,6 @@ static int __wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 	switch (type) {
 	/* Automatically determine transmit power */
 	case NL80211_TX_POWER_AUTOMATIC:
-	/* Fall through */
 	case NL80211_TX_POWER_LIMITED:
 	/* Limit TX power by the mBm parameter */
 		status = sme_set_max_tx_power(mac_handle, bssid, selfmac, dbm);

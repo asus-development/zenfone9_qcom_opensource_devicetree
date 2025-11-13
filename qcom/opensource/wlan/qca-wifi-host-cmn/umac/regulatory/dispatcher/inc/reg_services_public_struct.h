@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -471,7 +471,7 @@ enum channel_enum {
 	MAX_24GHZ_CHANNEL = CHAN_ENUM_2484,
 	NUM_24GHZ_CHANNELS = (MAX_24GHZ_CHANNEL - MIN_24GHZ_CHANNEL + 1),
 
-	INVALID_CHANNEL = 0xBAD,
+	INVALID_CHANNEL = NUM_CHANNELS,
 
 #ifdef CONFIG_49GHZ_CHAN
 	MIN_49GHZ_CHANNEL = CHAN_ENUM_4912,
@@ -944,6 +944,7 @@ struct get_usable_chan_req_params {
  *                   intolerance.
  * @psd_flag: is PSD channel or not
  * @psd_eirp: PSD power level
+ * @power_type: channel power type
  */
 struct regulatory_channel {
 	qdf_freq_t center_freq;
@@ -963,6 +964,9 @@ struct regulatory_channel {
 #ifdef CONFIG_BAND_6GHZ
 	bool psd_flag;
 	uint16_t psd_eirp;
+#endif
+#ifdef CONFIG_REG_CLIENT
+	enum reg_6g_ap_type power_type;
 #endif
 };
 
@@ -1401,6 +1405,7 @@ enum restart_beaconing_on_ch_avoid_rule {
  * userspace
  * @coex_unsafe_chan_reg_disable: To disable reg channels for received coex
  * unsafe channels list
+ * @sta_sap_scc_on_indoor_channel: Value of sap+sta scc on indoor support
  */
 struct reg_config_vars {
 	uint32_t enable_11d_support;
@@ -1419,6 +1424,7 @@ struct reg_config_vars {
 	bool coex_unsafe_chan_nb_user_prefer;
 	bool coex_unsafe_chan_reg_disable;
 #endif
+	bool sta_sap_scc_on_indoor_channel;
 };
 
 /**
@@ -1679,6 +1685,7 @@ struct chan_power_info {
  * @frequency: Array of operating frequency
  * @tpe: TPE values processed from TPE IE
  * @chan_power_info: power info to send to FW
+ * @is_power_constraint_abs: is power constraint absolute or not
  */
 struct reg_tpc_power_info {
 	bool is_psd_power;
@@ -1690,6 +1697,7 @@ struct reg_tpc_power_info {
 	qdf_freq_t frequency[MAX_NUM_PWR_LEVEL];
 	uint8_t tpe[MAX_NUM_PWR_LEVEL];
 	struct chan_power_info chan_power_info[MAX_NUM_PWR_LEVEL];
+	bool is_power_constraint_abs;
 };
 
 #ifdef FEATURE_WLAN_CH_AVOID_EXT
@@ -2110,4 +2118,15 @@ typedef void (*afc_req_rx_evt_handler)(struct wlan_objmgr_pdev *pdev,
 				       struct wlan_afc_host_partial_request *afc_par_req,
 				       void *arg);
 #endif
+
+/**
+ * reg_is_chan_enum_invalid() - Checks if the channel enum is invalid or not.
+ * @chan_enum: Input channel enum.
+ *
+ * Return: true if channel enum is invalid else false.
+ */
+static inline bool reg_is_chan_enum_invalid(enum channel_enum chan_enum)
+{
+	return chan_enum >= INVALID_CHANNEL;
+}
 #endif

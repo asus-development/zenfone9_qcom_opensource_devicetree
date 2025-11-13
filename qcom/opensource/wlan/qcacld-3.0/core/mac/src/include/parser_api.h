@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -30,7 +30,7 @@
 #ifndef __PARSE_H__
 #define __PARSE_H__
 
-#include <stdarg.h>
+#include "qdf_types.h"
 #include "sir_mac_prop_exts.h"
 #include "dot11f.h"
 #include "lim_ft_defs.h"
@@ -473,6 +473,7 @@ typedef struct sSirAssocRsp {
 	tDot11fIEVHTCaps VHTCaps;
 	tDot11fIEVHTOperation VHTOperation;
 	tDot11fIEExtCap ExtCap;
+	tDot11fIEOperatingMode oper_mode_ntf;
 	struct qos_map_set QosMapSet;
 	tDot11fIETimeoutInterval TimeoutInterval;
 	tDot11fIERRMEnabledCap rrm_caps;

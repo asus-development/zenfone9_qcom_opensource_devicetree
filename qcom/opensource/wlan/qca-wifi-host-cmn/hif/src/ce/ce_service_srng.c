@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -78,6 +78,26 @@
 			(uint32_t)(((dma_addr) >> 32) & 0xFF);\
 	} while (0)
 
+void hif_display_ctrl_traffic_pipes_state(struct hif_opaque_softc *hif_ctx)
+{
+	struct hif_softc *scn = HIF_GET_SOFTC(hif_ctx);
+	struct CE_state *CE_state;
+	uint32_t hp = 0, tp = 0;
+
+	CE_state = scn->ce_id_to_state[2];
+	hal_get_sw_hptp(scn->hal_soc,
+			CE_state->status_ring->srng_ctx,
+			&tp, &hp);
+	hif_info_high("CE-2 Dest status ring current snapshot HP:%u TP:%u",
+		      hp, tp);
+
+	hp = 0;
+	tp = 0;
+	CE_state = scn->ce_id_to_state[3];
+	hal_get_sw_hptp(scn->hal_soc, CE_state->src_ring->srng_ctx, &tp, &hp);
+	hif_info_high("CE-3 Source ring current snapshot HP:%u TP:%u", hp, tp);
+}
+
 #if defined(HIF_CONFIG_SLUB_DEBUG_ON) || defined(HIF_CE_DEBUG_DATA_BUF)
 void hif_record_ce_srng_desc_event(struct hif_softc *scn, int ce_id,
 				   enum hif_ce_event_type type,
@@ -131,6 +151,9 @@ void hif_record_ce_srng_desc_event(struct hif_softc *scn, int ce_id,
 
 	if (ce_hist->data_enable[ce_id])
 		hif_ce_desc_data_record(event, len);
+
+	hif_record_latest_evt(ce_hist, type, ce_id, event->time,
+			      event->current_hp, event->current_tp);
 }
 #endif /* HIF_CONFIG_SLUB_DEBUG_ON || HIF_CE_DEBUG_DATA_BUF */
 
@@ -292,7 +315,7 @@ ce_sendlist_send_srng(struct CE_handle *copyeng,
 #endif
 /**
  * ce_recv_buf_enqueue_srng() - enqueue a recv buffer into a copy engine
- * @coyeng: copy engine handle
+ * @copyeng: copy engine handle
  * @per_recv_context: virtual address of the nbuf
  * @buffer: physical address of the nbuf
  *
@@ -423,16 +446,13 @@ ce_completed_recv_next_nolock_srng(struct CE_state *CE_state,
 	int nbytes;
 	struct ce_srng_dest_status_desc dest_status_info;
 
-	if (hal_srng_access_start(scn->hal_soc, status_ring->srng_ctx)) {
-		status = QDF_STATUS_E_FAILURE;
-		goto done;
-	}
+	if (hal_srng_access_start(scn->hal_soc, status_ring->srng_ctx))
+		return QDF_STATUS_E_FAILURE;
 
 	dest_status = hal_srng_dst_peek(scn->hal_soc, status_ring->srng_ctx);
 	if (!dest_status) {
-		status = QDF_STATUS_E_FAILURE;
 		hal_srng_access_end_reap(scn->hal_soc, status_ring->srng_ctx);
-		goto done;
+		return QDF_STATUS_E_FAILURE;
 	}
 
 	/*

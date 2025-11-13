@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -48,12 +49,6 @@
 
 #define WMA_WMM_EXPO_TO_VAL(val)        ((1 << (val)) - 1)
 
-#define MAX_HT_MCS_IDX 8
-#define MAX_VHT_MCS_IDX 10
-#ifdef WLAN_FEATURE_11AX
-#define MAX_HE_MCS_IDX 12
-#define MAX_HE_MCS12_13_IDX 14
-#endif
 #define INVALID_MCS_IDX 255
 
 #define IS_MCS_HAS_DCM_RATE(val)  \
@@ -737,6 +732,26 @@ void wma_set_sta_keep_alive(tp_wma_handle wma, uint8_t vdev_id,
 void wma_objmgr_set_peer_mlme_phymode(tp_wma_handle wma, uint8_t *mac_addr,
 				      enum wlan_phymode phymode);
 
+/**
+ * wma_objmgr_set_peer_mlme_nss() - set nss to peer object
+ * @wma:      wma handle
+ * @mac_addr: mac addr of peer
+ * @nss:  nss value to set
+ *
+ * Return: None
+ */
+void wma_objmgr_set_peer_mlme_nss(tp_wma_handle wma, uint8_t *mac_addr,
+				  uint8_t nss);
+
+/**
+ * wma_objmgr_get_peer_mlme_nss() - set nss to peer object
+ * @wma:      wma handle
+ * @mac_addr: mac addr of peer
+ *
+ * Return: Peer NSS
+ */
+uint8_t wma_objmgr_get_peer_mlme_nss(tp_wma_handle wma, uint8_t *mac_addr);
+
 QDF_STATUS wma_send_peer_assoc(tp_wma_handle wma,
 					   tSirNwType nw_type,
 					   tpAddStaParams params);
@@ -940,10 +955,6 @@ int32_t wmi_unified_send_txbf(tp_wma_handle wma, tpAddStaParams params);
  * Return: QDF_STATUS_SUCCESS for success or error code
  */
 QDF_STATUS wma_check_txrx_chainmask(int num_rf_chains, int cmd_value);
-
-int wma_peer_state_change_event_handler(void *handle,
-					       uint8_t *event_buff,
-					       uint32_t len);
 
 QDF_STATUS wma_set_enable_disable_mcc_adaptive_scheduler(uint32_t
 						mcc_adaptive_scheduler);
@@ -1705,6 +1716,19 @@ int wma_cold_boot_cal_event_handler(void *wma_ctx, uint8_t *event_buff,
  * Return: Success or Failure status
  */
 int wma_oem_event_handler(void *wma_ctx, uint8_t *event_buff, uint32_t len);
+#endif
+
+#ifdef MULTI_CLIENT_LL_SUPPORT
+/**
+ * wma_latency_level_event_handler() - latency level event handler
+ * @wma_ctx: wma handle
+ * @event_buff: event data
+ * @len: length of event buffer
+ *
+ * Return: Success or Failure status
+ */
+int wma_latency_level_event_handler(void *wma_ctx, uint8_t *event_buff,
+				    uint32_t len);
 #endif
 
 /**

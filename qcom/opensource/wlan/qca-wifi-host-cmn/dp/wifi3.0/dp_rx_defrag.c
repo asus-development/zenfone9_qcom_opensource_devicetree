@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1481,7 +1481,7 @@ static QDF_STATUS dp_rx_defrag(struct dp_peer *peer, unsigned tid,
 	switch (peer->security[index].sec_type) {
 	case cdp_sec_type_tkip:
 		tkip_demic = 1;
-
+		fallthrough;
 	case cdp_sec_type_tkip_nomic:
 		while (cur) {
 			tmp_next = qdf_nbuf_next(cur);
@@ -1770,6 +1770,9 @@ dp_rx_defrag_store_fragment(struct dp_soc *soc,
 
 	pdev = peer->vdev->pdev;
 	rx_tid = &peer->rx_tid[tid];
+
+	dp_rx_err_send_pktlog(soc, pdev, mpdu_desc_info, frag,
+			      QDF_TX_RX_STATUS_OK, false);
 
 	qdf_spin_lock_bh(&rx_tid->tid_lock);
 	rx_reorder_array_elem = peer->rx_tid[tid].array;

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -229,6 +229,7 @@ struct mlme_edca_ac_vo {
  * MLME_DOT11_MODE_11AX_ONLY: vdev just supports 11AX mode
  * MLME_DOT11_MODE_11BE: vdev supports 11BE mode, and modes above it
  * MLME_DOT11_MODE_11BE_ONLY: vdev just supports 11BE mode
+ * MLME_DOT11_MODE_ABG: vdev supports just 11A, 11B and 11G modes
  */
 enum mlme_dot11_mode {
 	MLME_DOT11_MODE_ALL,
@@ -243,7 +244,8 @@ enum mlme_dot11_mode {
 	MLME_DOT11_MODE_11AX,
 	MLME_DOT11_MODE_11AX_ONLY,
 	MLME_DOT11_MODE_11BE,
-	MLME_DOT11_MODE_11BE_ONLY
+	MLME_DOT11_MODE_11BE_ONLY,
+	MLME_DOT11_MODE_ABG
 };
 
 /**
@@ -1322,6 +1324,7 @@ enum mlme_cfg_frame_type {
  * @disable_4way_hs_offload: enable/disable 4 way handshake offload to firmware
  * @as_enabled: antenna sharing enabled or not (FW capability)
  * @mgmt_retry_max: maximum retries for management frame
+ * @enable_he_mcs0_for_6ghz_mgmt: HE MCS0 rate for mgmt frames in 6GHz band
  * @bmiss_skip_full_scan: Decide if full scan can be skipped in firmware if no
  * candidate is found in partial scan based on channel map
  * @enable_ring_buffer: Decide to enable/disable ring buffer for bug report
@@ -1340,6 +1343,9 @@ enum mlme_cfg_frame_type {
  * @dual_sta_policy_cfg: Dual STA policies configuration
  * @tx_retry_multiplier: TX xretry extension parameter
  * @mgmt_hw_tx_retry_count: MGMT HW tx retry count for frames
+ * @std_6ghz_conn_policy: 6GHz standard connection policy
+ * @safe_mode_enable: safe mode to bypass some strict 6 GHz checks for
+ * connection, bypass strict power levels
  */
 struct wlan_mlme_generic {
 	uint32_t band_capability;
@@ -1371,6 +1377,7 @@ struct wlan_mlme_generic {
 	uint32_t disable_4way_hs_offload;
 	bool as_enabled;
 	uint8_t mgmt_retry_max;
+	bool enable_he_mcs0_for_6ghz_mgmt;
 	bool bmiss_skip_full_scan;
 	bool enable_ring_buffer;
 	bool enable_peer_unmap_conf_support;
@@ -1387,6 +1394,10 @@ struct wlan_mlme_generic {
 	struct dual_sta_policy dual_sta_policy;
 	uint32_t tx_retry_multiplier;
 	uint8_t mgmt_hw_tx_retry_count[CFG_FRAME_TYPE_MAX];
+#ifdef CONFIG_BAND_6GHZ
+	bool std_6ghz_conn_policy;
+#endif
+	bool safe_mode_enable;
 };
 
 /*
@@ -1602,6 +1613,7 @@ enum station_keepalive_method {
  * @allow_tpc_from_ap:              Support for AP power constraint
  * @usr_disabled_roaming:           User config for roaming disable
  * @usr_scan_probe_unicast_ra:      User config unicast probe req in scan
+ * @single_link_mlo_conn:           Single link mlo connection is configured
  */
 struct wlan_mlme_sta_cfg {
 	uint32_t sta_keep_alive_period;
@@ -1627,6 +1639,9 @@ struct wlan_mlme_sta_cfg {
 	bool usr_scan_probe_unicast_ra;
 #ifdef FEATURE_WLAN_DIAG_SUPPORT_CSR
 	host_event_wlan_status_payload_type event_payload;
+#endif
+#ifdef WLAN_FEATURE_11BE_MLO
+	bool single_link_mlo_conn;
 #endif
 };
 
@@ -1725,6 +1740,8 @@ struct fw_scan_channels {
  * vsie in Re(assoc) frame
  * @roam_trigger_bitmap:            Bitmap of roaming triggers.
  * @sta_roam_disable                STA roaming disabled by interfaces
+ * @roam_high_rssi_delta: Delta change in high RSSI at which roam scan is
+ * triggered in 2.4/5 GHz.
  * @early_stop_scan_enable:         Set early stop scan
  * @enable_5g_band_pref:            Enable preference for 5G from INI
  * @ese_enabled:                    Enable ESE feature
@@ -1771,6 +1788,7 @@ struct fw_scan_channels {
  * @roam_preauth_retry_count:       Configure the max number of preauth retry
  * @roam_preauth_no_ack_timeout:    Configure the no ack timeout period
  * @roam_rssi_diff:                 Enable roam based on rssi
+ * @roam_rssi_diff_6ghz: RSSI diff value to be used for roaming to 6 GHz AP.
  * @roam_scan_offload_enabled:      Enable Roam Scan Offload
  * @neighbor_scan_timer_period:     Neighbor scan timer period
  * @neighbor_scan_min_timer_period: Min neighbor scan timer period
@@ -1820,6 +1838,13 @@ struct fw_scan_channels {
  * @sae_single_pmk_feature_enabled: Contains value of ini
  * sae_single_pmk_feature_enabled
  * @rso_user_config: RSO user config
+ * @roam_ho_delay_config: Roam HO delay value
+ * @exclude_rm_partial_scan_freq: Exclude the channels in roam full scan that
+ * are already scanned as part of partial scan.
+ * @roam_full_scan_6ghz_on_disc: Include the 6 GHz channels in roam full scan
+ * only on prior discovery of any 6 GHz support in the environment.
+ * @disconnect_on_nud_roam_invoke_fail: indicate whether disconnect ap when
+ * roam invoke fail on nud.
  */
 struct wlan_mlme_lfr_cfg {
 	bool mawc_roam_enabled;
@@ -1840,6 +1865,7 @@ struct wlan_mlme_lfr_cfg {
 	bool enable_roam_reason_vsie;
 	uint32_t roam_trigger_bitmap;
 	uint32_t sta_roam_disable;
+	uint8_t roam_high_rssi_delta;
 #endif
 	bool early_stop_scan_enable;
 	bool enable_5g_band_pref;
@@ -1856,8 +1882,8 @@ struct wlan_mlme_lfr_cfg {
 	uint8_t mawc_roam_rssi_low_adjust;
 	uint32_t roam_rssi_abs_threshold;
 	uint8_t rssi_threshold_offset_5g;
-	uint8_t early_stop_scan_min_threshold;
-	uint8_t early_stop_scan_max_threshold;
+	int8_t early_stop_scan_min_threshold;
+	int8_t early_stop_scan_max_threshold;
 	uint32_t roam_dense_traffic_threshold;
 	uint32_t roam_dense_rssi_thre_offset;
 	uint32_t roam_dense_min_aps;
@@ -1888,6 +1914,7 @@ struct wlan_mlme_lfr_cfg {
 	uint32_t roam_preauth_retry_count;
 	uint32_t roam_preauth_no_ack_timeout;
 	uint8_t roam_rssi_diff;
+	uint8_t roam_rssi_diff_6ghz;
 	uint8_t bg_rssi_threshold;
 	bool roam_scan_offload_enabled;
 	uint32_t neighbor_scan_timer_period;
@@ -1939,6 +1966,10 @@ struct wlan_mlme_lfr_cfg {
 #endif
 	struct rso_config_params rso_user_config;
 	bool enable_ft_over_ds;
+	uint16_t roam_ho_delay_config;
+	uint8_t exclude_rm_partial_scan_freq;
+	uint8_t roam_full_scan_6ghz_on_disc;
+	bool disconnect_on_nud_roam_invoke_fail;
 };
 
 /**
@@ -2242,6 +2273,7 @@ struct wlan_mlme_power {
 /*
  * struct wlan_mlme_timeout - mlme timeout related config items
  * @join_failure_timeout: join failure timeout (can be changed in connect req)
+ * @probe_req_retry_timeout: Probe req retry timeout during join time
  * @join_failure_timeout_ori: original value of above join timeout
  * @auth_failure_timeout: authenticate failure timeout
  * @auth_rsp_timeout: authenticate response timeout
@@ -2258,6 +2290,7 @@ struct wlan_mlme_power {
  */
 struct wlan_mlme_timeout {
 	uint32_t join_failure_timeout;
+	uint32_t probe_req_retry_timeout;
 	uint32_t join_failure_timeout_ori;
 	uint32_t auth_failure_timeout;
 	uint32_t auth_rsp_timeout;
@@ -2375,6 +2408,7 @@ struct wlan_mlme_btm {
  * @latency_level: WLM latency level
  * @latency_flags: WLM latency flags setting
  * @latency_host_flags: WLM latency host flags setting
+ * @multi_client_ll_support: To check whether host support multi client feature
  */
 struct wlan_mlme_fe_wlm {
 	bool latency_enable;
@@ -2382,6 +2416,9 @@ struct wlan_mlme_fe_wlm {
 	uint8_t latency_level;
 	uint32_t latency_flags[MLME_NUM_WLM_LATENCY_LEVEL];
 	uint32_t latency_host_flags[MLME_NUM_WLM_LATENCY_LEVEL];
+#ifdef MULTI_CLIENT_LL_SUPPORT
+	bool multi_client_ll_support;
+#endif
 };
 
 /**

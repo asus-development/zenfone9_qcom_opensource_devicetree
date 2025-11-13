@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -200,6 +201,9 @@ static void htc_cleanup(HTC_TARGET *target)
 		qdf_mem_free(pPacket);
 	}
 #endif
+	HTC_INFO("%s: Non flow ctrl enabled endpoints nbuf map: %d, unamp: %d",
+		 __func__, target->nbuf_nfc_map_count,
+		 target->nbuf_nfc_unmap_count);
 
 	htc_flush_endpoint_txlookupQ(target, ENDPOINT_0, true);
 
@@ -1014,7 +1018,9 @@ void htc_stop(HTC_HANDLE HTCHandle)
 		endpoint = &target->endpoint[i];
 		if (endpoint->service_id == WMI_CONTROL_SVC)
 			htc_flush_endpoint_txlookupQ(target, i, false);
-		else if (endpoint->service_id == HTC_CTRL_RSVD_SVC)
+		else if (endpoint->service_id == HTC_CTRL_RSVD_SVC ||
+			 (endpoint->service_id == HTT_DATA_MSG_SVC &&
+			  !endpoint->ul_is_polled))
 			htc_flush_endpoint_txlookupQ(target, i, true);
 	}
 	HTC_INFO("%s: resetting endpoints state\n", __func__);

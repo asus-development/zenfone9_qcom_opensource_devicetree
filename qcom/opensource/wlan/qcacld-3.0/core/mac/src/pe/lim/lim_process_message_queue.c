@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2011-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -98,8 +98,9 @@ static void lim_process_sae_msg_sta(struct mac_context *mac,
 						    STATUS_SUCCESS,
 						    session);
 		else
-			lim_restore_from_auth_state(mac, eSIR_SME_AUTH_REFUSED,
-				STATUS_UNSPECIFIED_FAILURE, session);
+			lim_restore_from_auth_state(mac, sae_msg->result_code,
+						    sae_msg->sae_status,
+						    session);
 		break;
 	default:
 		/* SAE msg is received in unexpected state */
@@ -148,10 +149,11 @@ static void lim_process_sae_msg_ap(struct mac_context *mac,
 		if (assoc_req->present) {
 			pe_debug("Assoc req cached; clean it up");
 			lim_process_assoc_cleanup(mac, session,
-						  assoc_req->assoc_req,
 						  assoc_req->sta_ds,
 						  assoc_req->assoc_req_copied);
 			assoc_req->present = false;
+			lim_free_assoc_req_frm_buf(assoc_req->assoc_req);
+			qdf_mem_free(assoc_req->assoc_req);
 		}
 		lim_delete_pre_auth_node(mac, sae_msg->peer_mac_addr);
 		return;
@@ -177,11 +179,13 @@ static void lim_process_sae_msg_ap(struct mac_context *mac,
 						  &assoc_req_copied,
 						  assoc_req->dup_entry, false,
 						  assoc_req->partner_peer_idx);
-		if (!assoc_ind_sent)
+		if (!assoc_ind_sent) {
 			lim_process_assoc_cleanup(mac, session,
-						  assoc_req->assoc_req,
 						  assoc_req->sta_ds,
 						  assoc_req_copied);
+			lim_free_assoc_req_frm_buf(assoc_req->assoc_req);
+			qdf_mem_free(assoc_req->assoc_req);
+		}
 	}
 }
 
@@ -192,7 +196,7 @@ static void lim_process_sae_msg_ap(struct mac_context *mac,
  *
  * Return: None
  */
-static void lim_process_sae_msg(struct mac_context *mac, struct sir_sae_msg *body)
+void lim_process_sae_msg(struct mac_context *mac, struct sir_sae_msg *body)
 {
 	struct sir_sae_msg *sae_msg = body;
 	struct pe_session *session;
@@ -228,9 +232,6 @@ static void lim_process_sae_msg(struct mac_context *mac, struct sir_sae_msg *bod
 	else
 		pe_debug("SAE message on unsupported interface");
 }
-#else
-static inline void lim_process_sae_msg(struct mac_context *mac, void *body)
-{}
 #endif
 
 /**
@@ -1758,7 +1759,6 @@ static void lim_process_messages(struct mac_context *mac_ctx,
 #endif  /* FEATURE_WLAN_ESE */
 	case eWNI_SME_REGISTER_MGMT_FRAME_CB:
 	case eWNI_SME_EXT_CHANGE_CHANNEL:
-		/* fall through */
 	case eWNI_SME_SET_ADDBA_ACCEPT:
 	case eWNI_SME_UPDATE_EDCA_PROFILE:
 	case WNI_SME_UPDATE_MU_EDCA_PARAMS:

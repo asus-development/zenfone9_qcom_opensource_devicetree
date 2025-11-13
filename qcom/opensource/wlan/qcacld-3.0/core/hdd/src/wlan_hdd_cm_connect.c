@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -51,6 +51,7 @@
 #include <wlan_hdd_regulatory.h>
 #include <wlan_twt_ucfg_ext_api.h>
 #include <osif_twt_internal.h>
+#include "wlan_hdd_hostapd.h"
 
 bool hdd_cm_is_vdev_associated(struct hdd_adapter *adapter)
 {
@@ -387,6 +388,189 @@ hdd_get_dot11mode_filter(struct hdd_context *hdd_ctx)
 		return ALLOW_ALL;
 }
 
+/**
+ * hdd_get_sap_adapter_of_dfs - Get sap adapter on dfs channel
+ * @hdd_ctx: HDD context
+ *
+ * This function is used to get the sap adapter on dfs channel.
+ *
+ * Return: pointer to adapter or null
+ */
+static struct hdd_adapter
+*hdd_get_sap_adapter_of_dfs(struct hdd_context *hdd_ctx)
+{
+	struct hdd_adapter *adapter, *next_adapter = NULL;
+	wlan_net_dev_ref_dbgid dbgid = NET_DEV_HOLD_GET_ADAPTER;
+	qdf_freq_t chan_freq = 0;
+
+	hdd_for_each_adapter_dev_held_safe(hdd_ctx, adapter, next_adapter,
+					   dbgid) {
+		if (adapter->device_mode != QDF_SAP_MODE)
+			goto loop_next;
+
+		/*
+		 * sap is not in started state and also not under doing CAC,
+		 * so it is fine to go ahead with sta.
+		 */
+		if (!test_bit(SOFTAP_BSS_STARTED, &(adapter)->event_flags) &&
+		    (hdd_ctx->dev_dfs_cac_status != DFS_CAC_IN_PROGRESS))
+			goto loop_next;
+
+		chan_freq = wlan_get_operation_chan_freq_vdev_id(hdd_ctx->pdev,
+							adapter->vdev_id);
+
+		if (chan_freq && wlan_reg_is_dfs_for_freq(hdd_ctx->pdev,
+							  chan_freq)) {
+			hdd_adapter_dev_put_debug(adapter, dbgid);
+			if (next_adapter)
+				hdd_adapter_dev_put_debug(next_adapter, dbgid);
+
+			return adapter;
+		}
+loop_next:
+		hdd_adapter_dev_put_debug(adapter, dbgid);
+	}
+
+	return NULL;
+}
+
+/**
+ * wlan_hdd_cm_handle_sap_sta_dfs_conc() - to handle SAP STA DFS conc
+ * @hdd_ctx: hdd_ctx
+ * @req: connect req
+ *
+ * This routine will move SAP from dfs to non-dfs, if sta is coming up.
+ *
+ * Return: false if sta-sap conc is not allowed, else return true
+ */
+static
+bool wlan_hdd_cm_handle_sap_sta_dfs_conc(struct hdd_context *hdd_ctx,
+					 struct cfg80211_connect_params *req)
+{
+	struct hdd_adapter *ap_adapter;
+	struct hdd_ap_ctx *hdd_ap_ctx;
+	struct hdd_hostapd_state *hostapd_state;
+	QDF_STATUS status;
+	qdf_freq_t ch_freq = 0;
+	struct scan_filter *scan_filter;
+	qdf_list_t *list = NULL;
+	qdf_list_node_t *cur_lst = NULL;
+	struct scan_cache_node *cur_node = NULL;
+
+	ap_adapter = hdd_get_sap_adapter_of_dfs(hdd_ctx);
+	/* probably no dfs sap running, no handling required */
+	if (!ap_adapter)
+		return true;
+
+	/* if sap is currently doing CAC then don't allow sta to go further */
+	if (hdd_ctx->dev_dfs_cac_status == DFS_CAC_IN_PROGRESS) {
+		hdd_err("Concurrent SAP is in CAC state, STA is not allowed");
+		return false;
+	}
+
+	/*
+	 * log and return error, if we allow STA to go through, we don't
+	 * know what is going to happen better stop sta connection
+	 */
+	hdd_ap_ctx = WLAN_HDD_GET_AP_CTX_PTR(ap_adapter);
+	if (!hdd_ap_ctx) {
+		hdd_err("AP context not found");
+		return false;
+	}
+
+	if (req->channel && req->channel->center_freq) {
+		ch_freq = req->channel->center_freq;
+		goto def_chan;
+	}
+	/*
+	 * find out by looking in to scan cache where sta is going to
+	 * connect by passing its ssid amd bssid.
+	 */
+	scan_filter = qdf_mem_malloc(sizeof(*scan_filter));
+	if (!scan_filter)
+		goto def_chan;
+
+	if (req->bssid) {
+		scan_filter->num_of_bssid = 1;
+		qdf_mem_copy(scan_filter->bssid_list[0].bytes, req->bssid,
+			     QDF_MAC_ADDR_SIZE);
+	}
+	scan_filter->num_of_ssid = 1;
+	scan_filter->ssid_list[0].length =
+				QDF_MIN(req->ssid_len, QDF_MAC_ADDR_SIZE);
+	qdf_mem_copy(scan_filter->ssid_list[0].ssid, req->ssid,
+		     scan_filter->ssid_list[0].length);
+	scan_filter->ignore_auth_enc_type = true;
+	list = ucfg_scan_get_result(hdd_ctx->pdev, scan_filter);
+	qdf_mem_free(scan_filter);
+
+	if (!list || (list && !qdf_list_size(list))) {
+		hdd_debug("scan list empty");
+		goto purge_list;
+	}
+	qdf_list_peek_front(list, &cur_lst);
+	if (!cur_lst)
+		goto purge_list;
+
+	cur_node = qdf_container_of(cur_lst, struct scan_cache_node, node);
+	ch_freq = cur_node->entry->channel.chan_freq;
+purge_list:
+	if (list)
+		ucfg_scan_purge_results(list);
+def_chan:
+	/*
+	 * If the STA's channel is 2.4 GHz, then set pcl with only 2.4 GHz
+	 * channels for roaming case.
+	 */
+	if (WLAN_REG_IS_24GHZ_CH_FREQ(ch_freq)) {
+		hdd_info("sap is on dfs, new sta conn on 2.4 is allowed");
+		return true;
+	}
+
+	/*
+	 * If channel is 0 or DFS or LTE unsafe then better to call pcl and
+	 * find out the best channel. If channel is non-dfs 5 GHz then
+	 * better move SAP to STA's channel to make scc, so we have room
+	 * for 3port MCC scenario.
+	 */
+	if (!ch_freq || wlan_reg_is_dfs_for_freq(hdd_ctx->pdev, ch_freq) ||
+	    !policy_mgr_is_safe_channel(hdd_ctx->psoc, ch_freq))
+		ch_freq = policy_mgr_get_nondfs_preferred_channel(
+			hdd_ctx->psoc, PM_SAP_MODE, true);
+
+	hostapd_state = WLAN_HDD_GET_HOSTAP_STATE_PTR(ap_adapter);
+	qdf_event_reset(&hostapd_state->qdf_event);
+	wlan_hdd_set_sap_csa_reason(hdd_ctx->psoc, ap_adapter->vdev_id,
+				    CSA_REASON_STA_CONNECT_DFS_TO_NON_DFS);
+
+	status = wlansap_set_channel_change_with_csa(
+			WLAN_HDD_GET_SAP_CTX_PTR(ap_adapter), ch_freq,
+			hdd_ap_ctx->sap_config.ch_width_orig, false);
+
+	if (QDF_STATUS_SUCCESS != status) {
+		hdd_err("Set channel with CSA IE failed, can't allow STA");
+		return false;
+	}
+
+	/*
+	 * wait here for SAP to finish the channel switch. When channel
+	 * switch happens, SAP sends few beacons with CSA_IE. After
+	 * successfully Transmission of those beacons, it will move its
+	 * state from started to disconnected and move to new channel.
+	 * once it moves to new channel, sap again moves its state
+	 * machine from disconnected to started and set this event.
+	 * wait for 10 secs to finish this.
+	 */
+	status = qdf_wait_for_event_completion(&hostapd_state->qdf_event,
+					       10000);
+	if (!QDF_IS_STATUS_SUCCESS(status)) {
+		hdd_err("wait for qdf_event failed, STA not allowed!!");
+		return false;
+	}
+
+	return true;
+}
+
 int wlan_hdd_cm_connect(struct wiphy *wiphy,
 			struct net_device *ndev,
 			struct cfg80211_connect_params *req)
@@ -428,6 +612,12 @@ int wlan_hdd_cm_connect(struct wiphy *wiphy,
 		return status;
 
 	hdd_reg_wait_for_country_change(hdd_ctx);
+
+	if (policy_mgr_is_hw_dbs_capable(hdd_ctx->psoc) &&
+	    !wlan_hdd_cm_handle_sap_sta_dfs_conc(hdd_ctx, req)) {
+		hdd_err("sap-sta conc will fail, can't allow sta");
+		return -EINVAL;
+	}
 
 	qdf_mem_zero(&params, sizeof(params));
 	ucfg_blm_dump_black_list_ap(hdd_ctx->pdev);
@@ -573,6 +763,44 @@ static void hdd_cm_connect_failure(struct wlan_objmgr_vdev *vdev,
 	}
 }
 
+/**
+ * hdd_cm_update_prev_ap_ie() - Update the connected AP IEs
+ * @hdd_sta_ctx: Station context.
+ * @rsp: Connect response
+ *
+ * This API updates the connected ap beacon IEs to station context connection
+ * info.
+ *
+ * Return: None
+ */
+static void hdd_cm_update_prev_ap_ie(struct hdd_station_ctx *hdd_sta_ctx,
+				     struct wlan_cm_connect_resp *rsp)
+{
+	struct element_info *bcn_probe_rsp = &rsp->connect_ies.bcn_probe_rsp;
+	struct element_info *bcn_ie;
+	uint32_t len;
+
+	bcn_ie = &hdd_sta_ctx->conn_info.prev_ap_bcn_ie;
+	if (bcn_ie->ptr) {
+		qdf_mem_free(bcn_ie->ptr);
+		bcn_ie->ptr = NULL;
+		bcn_ie->len = 0;
+	}
+
+	if (bcn_probe_rsp->ptr &&
+	    bcn_probe_rsp->len > sizeof(struct wlan_frame_hdr)) {
+		len = bcn_probe_rsp->len - sizeof(struct wlan_frame_hdr);
+		bcn_ie->ptr = qdf_mem_malloc(len);
+		if (!bcn_ie->ptr) {
+			bcn_ie->len = 0;
+			return;
+		}
+		qdf_mem_copy(bcn_ie->ptr, bcn_probe_rsp->ptr +
+			     sizeof(struct wlan_frame_hdr), len);
+		bcn_ie->len = len;
+	}
+}
+
 static void hdd_cm_save_bss_info(struct hdd_adapter *adapter,
 				 struct wlan_cm_connect_resp *rsp)
 {
@@ -650,6 +878,7 @@ static void hdd_cm_save_bss_info(struct hdd_adapter *adapter,
 			     sizeof(hdd_sta_ctx->cache_conn_info));
 
 		hdd_copy_he_operation(hdd_sta_ctx, &assoc_resp->he_op);
+		hdd_cm_update_prev_ap_ie(hdd_sta_ctx, rsp);
 	}
 
 	qdf_mem_free(assoc_resp);
@@ -930,6 +1159,7 @@ hdd_cm_connect_success_pre_user_update(struct wlan_objmgr_vdev *vdev,
 	bool is_roam_offload = false;
 	bool is_roam = rsp->is_reassoc;
 	ol_txrx_soc_handle soc = cds_get_context(QDF_MODULE_ID_SOC);
+	uint8_t uapsd_mask = 0;
 	uint32_t phymode;
 	uint32_t time_buffer_size;
 	struct hdd_adapter *assoc_link_adapter;
@@ -1005,19 +1235,6 @@ hdd_cm_connect_success_pre_user_update(struct wlan_objmgr_vdev *vdev,
 	 * hdd_send_ft_assoc_response,
 	 */
 
-	/* send peer status indication to oem app */
-	vdev_mlme = wlan_objmgr_vdev_get_comp_private_obj(vdev,
-							  WLAN_UMAC_COMP_MLME);
-	if (vdev_mlme) {
-		hdd_send_peer_status_ind_to_app(
-			&rsp->bssid,
-			ePeerConnected,
-			vdev_mlme->ext_vdev_ptr->connect_info.timing_meas_cap,
-			adapter->vdev_id,
-			&vdev_mlme->ext_vdev_ptr->connect_info.chan_info,
-			adapter->device_mode);
-	}
-
 	hdd_ipa_set_tx_flow_info();
 	hdd_place_marker(adapter, "ASSOCIATION COMPLETE", NULL);
 
@@ -1054,6 +1271,16 @@ hdd_cm_connect_success_pre_user_update(struct wlan_objmgr_vdev *vdev,
 		adapter->is_link_up_service_needed = false;
 	}
 
+	vdev_mlme = wlan_objmgr_vdev_get_comp_private_obj(vdev,
+							  WLAN_UMAC_COMP_MLME);
+	if (vdev_mlme)
+		uapsd_mask =
+			vdev_mlme->ext_vdev_ptr->connect_info.uapsd_per_ac_bitmask;
+
+	cdp_hl_fc_set_td_limit(soc, adapter->vdev_id,
+			       sta_ctx->conn_info.chan_freq);
+	hdd_wmm_assoc(adapter, false, uapsd_mask);
+
 	if (!rsp->is_wps_connection &&
 	    (sta_ctx->conn_info.auth_type == eCSR_AUTH_TYPE_NONE ||
 	     sta_ctx->conn_info.auth_type == eCSR_AUTH_TYPE_OPEN_SYSTEM ||
@@ -1065,9 +1292,35 @@ hdd_cm_connect_success_pre_user_update(struct wlan_objmgr_vdev *vdev,
 		/* If roaming is set check if FW roaming/LFR3  */
 		ucfg_mlme_get_roaming_offload(hdd_ctx->psoc, &is_roam_offload);
 
-	if (is_roam_offload)
+	if (is_roam_offload || !is_roam) {
+		/* For FW_ROAM/LFR3 OR connect */
 		/* for LFR 3 get authenticated info from resp */
-		is_auth_required = hdd_cm_is_roam_auth_required(sta_ctx, rsp);
+		if (is_roam)
+			is_auth_required =
+				hdd_cm_is_roam_auth_required(sta_ctx, rsp);
+		if (is_auth_required)
+			wlan_acquire_peer_key_wakelock(hdd_ctx->pdev,
+						       rsp->bssid.bytes);
+		hdd_roam_register_sta(adapter, &rsp->bssid, is_auth_required);
+	} else {
+		/* for host roam/LFR2 */
+		hdd_cm_set_peer_authenticate(adapter, &rsp->bssid,
+					     is_auth_required);
+	}
+
+	hdd_debug("Enabling queues");
+	hdd_cm_netif_queue_enable(adapter);
+
+	/* send peer status indication to oem app */
+	if (vdev_mlme) {
+		hdd_send_peer_status_ind_to_app(
+			&rsp->bssid,
+			ePeerConnected,
+			vdev_mlme->ext_vdev_ptr->connect_info.timing_meas_cap,
+			adapter->vdev_id,
+			&vdev_mlme->ext_vdev_ptr->connect_info.chan_info,
+			adapter->device_mode);
+	}
 
 	if (ucfg_ipa_is_enabled() && !is_auth_required)
 		ucfg_ipa_wlan_evt(hdd_ctx->pdev, adapter->dev,
@@ -1090,7 +1343,12 @@ hdd_cm_connect_success_pre_user_update(struct wlan_objmgr_vdev *vdev,
 
 	if (is_roam)
 		hdd_nud_indicate_roam(adapter);
-	 /* hdd_objmgr_set_peer_mlme_auth_state */
+	/* hdd_objmgr_set_peer_mlme_auth_state */
+
+	if (adapter->keep_alive_interval)
+		hdd_vdev_send_sta_keep_alive_interval(adapter,
+					hdd_ctx,
+					adapter->keep_alive_interval);
 }
 
 static void
@@ -1099,12 +1357,6 @@ hdd_cm_connect_success_post_user_update(struct wlan_objmgr_vdev *vdev,
 {
 	struct hdd_context *hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 	struct hdd_adapter *adapter;
-	struct hdd_station_ctx *sta_ctx;
-	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
-	struct vdev_mlme_obj *mlme_obj = wlan_vdev_mlme_get_cmpt_obj(vdev);
-	uint8_t uapsd_mask = 0;
-	bool is_auth_required = true;
-	bool is_roam_offload = false;
 	bool is_roam = rsp->is_reassoc;
 
 	if (!hdd_ctx) {
@@ -1118,45 +1370,11 @@ hdd_cm_connect_success_post_user_update(struct wlan_objmgr_vdev *vdev,
 		return;
 	}
 
-	sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
-	if (mlme_obj)
-		uapsd_mask =
-			mlme_obj->ext_vdev_ptr->connect_info.uapsd_per_ac_bitmask;
-	if (is_roam) {
-		/* If roaming is set check if FW roaming/LFR3  */
-		ucfg_mlme_get_roaming_offload(hdd_ctx->psoc, &is_roam_offload);
-	} else {
+	if (!is_roam) {
 		/* call only for connect */
 		qdf_runtime_pm_allow_suspend(&hdd_ctx->runtime_context.connect);
 		hdd_allow_suspend(WIFI_POWER_EVENT_WAKELOCK_CONNECT);
 	}
-
-	cdp_hl_fc_set_td_limit(soc, adapter->vdev_id,
-			       sta_ctx->conn_info.chan_freq);
-	hdd_wmm_assoc(adapter, false, uapsd_mask);
-
-	if (!rsp->is_wps_connection &&
-	    (sta_ctx->conn_info.auth_type == eCSR_AUTH_TYPE_NONE ||
-	     sta_ctx->conn_info.auth_type == eCSR_AUTH_TYPE_OPEN_SYSTEM ||
-	     sta_ctx->conn_info.auth_type == eCSR_AUTH_TYPE_SHARED_KEY ||
-	     hdd_cm_is_fils_connection(rsp)))
-		is_auth_required = false;
-
-	if (is_roam_offload || !is_roam) {
-		/* For FW_ROAM/LFR3 OR connect */
-		/* for LFR 3 get authenticated info from resp */
-		if (is_roam)
-			is_auth_required =
-				hdd_cm_is_roam_auth_required(sta_ctx, rsp);
-		hdd_roam_register_sta(adapter, &rsp->bssid, is_auth_required);
-	} else {
-		/* for host roam/LFR2 */
-		hdd_cm_set_peer_authenticate(adapter, &rsp->bssid,
-					     is_auth_required);
-	}
-
-	hdd_debug("Enabling queues");
-	hdd_cm_netif_queue_enable(adapter);
 
 	hdd_cm_clear_pmf_stats(adapter);
 
@@ -1511,7 +1729,7 @@ QDF_STATUS hdd_cm_ft_preauth_complete(struct wlan_objmgr_vdev *vdev,
 		return QDF_STATUS_E_NOMEM;
 
 	/* need to send the RIC IEs first */
-	str_len = strlcpy(buff, "RIC=", IW_CUSTOM_MAX);
+	str_len = strscpy(buff, "RIC=", IW_CUSTOM_MAX);
 	if (rsp->ric_ies_length &&
 	    (rsp->ric_ies_length <= (IW_CUSTOM_MAX - str_len))) {
 		qdf_mem_copy(&buff[str_len], rsp->ric_ies,
@@ -1525,7 +1743,7 @@ QDF_STATUS hdd_cm_ft_preauth_complete(struct wlan_objmgr_vdev *vdev,
 
 	/* need to provide the Auth Resp */
 	qdf_mem_zero(buff, IW_CUSTOM_MAX);
-	str_len = strlcpy(buff, "AUTH=", IW_CUSTOM_MAX);
+	str_len = strscpy(buff, "AUTH=", IW_CUSTOM_MAX);
 	hdd_cm_get_ft_preauth_response(vdev, rsp, &buff[str_len],
 				       (IW_CUSTOM_MAX - str_len),
 				       &auth_resp_len);

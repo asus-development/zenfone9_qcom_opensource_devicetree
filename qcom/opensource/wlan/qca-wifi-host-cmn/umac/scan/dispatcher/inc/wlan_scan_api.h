@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -89,6 +90,22 @@ QDF_STATUS wlan_scan_cfg_set_passive_6g_dwelltime(struct wlan_objmgr_psoc *psoc,
  */
 QDF_STATUS wlan_scan_cfg_get_passive_6g_dwelltime(struct wlan_objmgr_psoc *psoc,
 						  uint32_t *dwell_time);
+
+/**
+ * wlan_scan_cfg_get_min_dwelltime_6g() - API to get minimum 6g dwelltime
+ * @psoc: pointer to psoc object
+ * @min_dwell_time_6ghz: minimum dwelltime 6g
+ *
+ * Return: QDF_STATUS
+ */
+void wlan_scan_cfg_get_min_dwelltime_6g(struct wlan_objmgr_psoc *psoc,
+					uint32_t *min_dwell_time_6ghz);
+#else
+static inline
+void wlan_scan_cfg_get_min_dwelltime_6g(struct wlan_objmgr_psoc *psoc,
+					uint32_t *min_dwell_time_6ghz)
+{
+}
 #endif
 
 /**
@@ -402,4 +419,13 @@ void
 wlan_scan_unregister_requester(struct wlan_objmgr_psoc *psoc,
 			       wlan_scan_requester requester);
 
+/**
+ * wlan_scan_cfg_skip_6g_and_indoor_freq() - API to get 6g and indoor freq
+ * scan ini val
+ * @psoc: psoc object
+ *
+ * Return: skip 6g and indoor freq scan or not
+ */
+bool wlan_scan_cfg_skip_6g_and_indoor_freq(
+			struct wlan_objmgr_psoc *psoc);
 #endif

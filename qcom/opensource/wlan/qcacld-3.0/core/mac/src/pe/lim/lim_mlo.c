@@ -537,8 +537,14 @@ QDF_STATUS lim_mlo_proc_assoc_req_frm(struct wlan_objmgr_vdev *vdev,
 
 	qdf_copy_macaddr((struct qdf_mac_addr *)assoc_req->mld_mac,
 			 &ml_peer->peer_mld_addr);
-	return lim_proc_assoc_req_frm_cmn(mac_ctx, sub_type, session, sa,
-					  assoc_req, ml_peer->assoc_id);
+	status = lim_proc_assoc_req_frm_cmn(mac_ctx, sub_type, session, sa,
+					    assoc_req, ml_peer->assoc_id);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		lim_free_assoc_req_frm_buf(assoc_req);
+		qdf_mem_free(assoc_req);
+	}
+
+	return status;
 }
 
 void lim_mlo_ap_sta_assoc_suc(struct wlan_objmgr_peer *peer)
@@ -778,6 +784,7 @@ QDF_STATUS lim_mlo_assoc_ind_upper_layer(struct mac_context *mac,
 		return status;
 	}
 
+	status = QDF_STATUS_SUCCESS;
 	for (link = 0; link < mlo_info->num_partner_links; link++) {
 		link_id = mlo_info->partner_link_info[link].link_id;
 		link_addr = &mlo_info->partner_link_info[link].link_addr;
@@ -846,7 +853,6 @@ QDF_STATUS lim_mlo_assoc_ind_upper_layer(struct mac_context *mac,
 				lk_session->parsedAssocReq[sta->assocId]);
 		qdf_mem_free(lk_session->parsedAssocReq[sta->assocId]);
 		lk_session->parsedAssocReq[sta->assocId] = NULL;
-		status = QDF_STATUS_SUCCESS;
 		lim_mlo_release_vdev_ref(lk_session->vdev);
 	}
 

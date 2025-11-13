@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -590,10 +590,8 @@ extd2_stats:
 
 	/* no matched peer */
 	if (!QDF_IS_ADDR_BROADCAST(last_req.peer_mac_addr) &&
-	    selected == ev->num_peer_adv_stats) {
+	    selected == ev->num_peer_adv_stats)
 		cp_stats_debug("peer not found for extd stats");
-		return;
-	}
 
 complete:
 	if (is_station_stats)
@@ -994,7 +992,7 @@ tgt_mc_cp_stats_prepare_n_send_raw_station_stats(struct wlan_objmgr_psoc *psoc,
 	peer = wlan_objmgr_get_peer(psoc, last_req->pdev_id,
 				    last_req->peer_mac_addr, WLAN_CP_STATS_ID);
 	if (!peer) {
-		cp_stats_err("peer object is null");
+		cp_stats_debug("peer object is null");
 		goto end;
 	}
 
@@ -1057,8 +1055,7 @@ tgt_mc_cp_stats_prepare_n_send_raw_station_stats(struct wlan_objmgr_psoc *psoc,
 	wlan_cp_stats_peer_obj_unlock(peer_cp_stats_priv);
 
 end:
-	if (info.vdev_summary_stats && info.vdev_chain_rssi)
-		get_station_stats_cb(&info, last_req->cookie);
+	get_station_stats_cb(&info, last_req->cookie);
 
 	ucfg_mc_cp_stats_free_stats_resources(&info);
 

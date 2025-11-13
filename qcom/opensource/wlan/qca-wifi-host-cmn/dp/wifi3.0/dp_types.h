@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -91,7 +91,7 @@
 #define DP_PDEV_MAX_VDEVS 17
 #endif
 
-#define MAX_TXDESC_POOLS 4
+#define MAX_TXDESC_POOLS 6
 #define MAX_RXDESC_POOLS 4
 
 #define EXCEPTION_DEST_RING_ID 0
@@ -1021,6 +1021,10 @@ struct dp_soc_stats {
 		uint64_t tqm_drop_no_peer;
 		/* Number of tx completions reaped per WBM2SW release ring */
 		uint32_t tx_comp[MAX_TCL_DATA_RINGS];
+		/* Number of tx completions force freed */
+		uint32_t tx_comp_force_freed;
+		/* Tx completion ring near full */
+		uint32_t near_full;
 	} tx;
 
 	/* SOC level RX stats */
@@ -2305,6 +2309,7 @@ struct dp_soc {
 	qdf_atomic_t ref_count;
 
 	unsigned long vdev_stats_id_map;
+	bool is_tx_pause;
 };
 
 #ifdef IPA_OFFLOAD
@@ -2840,9 +2845,26 @@ struct dp_pdev {
 #ifdef WLAN_FEATURE_11BE_MLO
 	struct dp_mlo_sync_timestamp timestamp;
 #endif
+#ifdef WLAN_FEATURE_MARK_FIRST_WAKEUP_PACKET
+	uint8_t is_first_wakeup_packet;
+#endif
+#ifdef CONNECTIVITY_PKTLOG
+	/* packetdump callback functions */
+	ol_txrx_pktdump_cb dp_tx_packetdump_cb;
+	ol_txrx_pktdump_cb dp_rx_packetdump_cb;
+#endif
 };
 
 struct dp_peer;
+
+#ifdef DP_RX_UDP_OVER_PEER_ROAM
+#define WLAN_ROAM_PEER_AUTH_STATUS_NONE 0x0
+/**
+ * This macro is equivalent to macro ROAM_AUTH_STATUS_AUTHENTICATED used
+ * in connection mgr
+ */
+#define WLAN_ROAM_PEER_AUTH_STATUS_AUTHENTICATED 0x2
+#endif
 
 /* VDEV structure for data path state */
 struct dp_vdev {
@@ -3130,6 +3152,14 @@ struct dp_vdev {
 
 	/* vdev_stats_id - ID used for stats collection by FW from HW*/
 	uint8_t vdev_stats_id;
+#ifdef HW_TX_DELAY_STATS_ENABLE
+	/* hw tx delay stats enable */
+	uint8_t hw_tx_delay_stats_enabled;
+#endif
+#ifdef DP_RX_UDP_OVER_PEER_ROAM
+	uint32_t roaming_peer_status;
+	union dp_align_mac_addr roaming_peer_mac;
+#endif
 };
 
 enum {
@@ -3372,7 +3402,8 @@ struct dp_peer {
 		in_twt:1, /* in TWT session */
 		delete_in_progress:1, /* Indicate kickout sent */
 		sta_self_peer:1, /* Indicate STA self peer */
-		hw_txrx_stats_en:1; /*Indicate HW offload vdev stats */
+		hw_txrx_stats_en:1, /*Indicate HW offload vdev stats */
+		is_tdls_peer:1; /* Indicate TDLS peer */
 
 #ifdef WLAN_FEATURE_11BE_MLO
 	uint8_t first_link:1, /* first link peer for MLO */
@@ -3475,6 +3506,12 @@ struct dp_peer {
 	uint8_t num_links;
 	DP_MUTEX_TYPE link_peers_info_lock;
 #endif
+#ifdef DP_PEER_EXTENDED_API
+	/* BW of peer connection */
+	enum cdp_peer_bw bw;
+	/* MPDU retry threshold to increment tx bad count */
+	uint8_t mpdu_retry_threshold;
+#endif
 };
 
 /*
@@ -3555,6 +3592,7 @@ struct dp_fisa_stats {
 	/* flow index invalid from RX HW TLV */
 	uint32_t invalid_flow_index;
 	uint32_t reo_mismatch;
+	uint32_t incorrect_rdi;
 };
 
 enum fisa_aggr_ret {

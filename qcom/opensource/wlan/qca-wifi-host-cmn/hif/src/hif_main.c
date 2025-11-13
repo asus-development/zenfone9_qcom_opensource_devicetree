@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2015-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -362,8 +362,88 @@ static const struct qwlan_hw qwlan_hw_list[] = {
 	},
 	{
 		.id = KIWI_V1,
-		.subid = 0xE,
+		.subid = 0,
 		.name = "KIWI_V1",
+	},
+	{
+		.id = KIWI_V2,
+		.subid = 0,
+		.name = "KIWI_V2",
+	},
+	{
+		.id = WCN6750_V1,
+		.subid = 0,
+		.name = "WCN6750_V1",
+	},
+	{
+		.id = WCN6750_V2,
+		.subid = 0,
+		.name = "WCN6750_V2",
+	},
+	{
+		.id = QCA6490_v2_1,
+		.subid = 0,
+		.name = "QCA6490",
+	},
+	{
+		.id = QCA6490_v2,
+		.subid = 0,
+		.name = "QCA6490",
+	},
+	{
+		.id = QCA6490_V2_2,
+		.subid = 0,
+		.name = "QCA6490",
+	},
+	{
+		.id = WCN3990_TALOS,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_MOOREA,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_SAIPAN,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_RENNELL,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_BITRA,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_DIVAR,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_ATHERTON,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_STRAIT,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_NETRANI,
+		.subid = 0,
+		.name = "WCN3990",
+	},
+	{
+		.id = WCN3990_CLARENCE,
+		.subid = 0,
+		.name = "WCN3990",
 	}
 };
 
@@ -376,6 +456,10 @@ static const struct qwlan_hw qwlan_hw_list[] = {
 static const char *hif_get_hw_name(struct hif_target_info *info)
 {
 	int i;
+
+	hif_debug("target version = %d, target revision = %d",
+		  info->target_version,
+		  info->target_revision);
 
 	if (info->hw_name)
 		return info->hw_name;
@@ -568,7 +652,8 @@ QDF_STATUS hif_unregister_recovery_notifier(struct hif_softc *hif_handle)
 }
 #endif
 
-#ifdef HIF_CPU_PERF_AFFINE_MASK
+#if defined(HIF_CPU_PERF_AFFINE_MASK) || \
+    defined(FEATURE_ENABLE_CE_DP_IRQ_AFFINE)
 /**
  * __hif_cpu_hotplug_notify() - CPU hotplug event handler
  * @cpu: CPU Id of the CPU generating the event
@@ -839,7 +924,7 @@ void hif_latency_detect_timer_start(struct hif_opaque_softc *hif_ctx)
 	if (QDF_GLOBAL_MISSION_MODE != hif_get_conparam(scn))
 		return;
 
-	hif_info_rl("start timer");
+	hif_debug_rl("start timer");
 	if (scn->latency_detect.is_timer_started) {
 		hif_info("timer has been started");
 		return;
@@ -857,7 +942,7 @@ void hif_latency_detect_timer_stop(struct hif_opaque_softc *hif_ctx)
 	if (QDF_GLOBAL_MISSION_MODE != hif_get_conparam(scn))
 		return;
 
-	hif_info_rl("stop timer");
+	hif_debug_rl("stop timer");
 
 	qdf_timer_sync_cancel(&scn->latency_detect.detect_latency_timer);
 	scn->latency_detect.is_timer_started = false;
@@ -1111,10 +1196,11 @@ QDF_STATUS hif_try_prevent_ep_vote_access(struct hif_opaque_softc *hif_ctx)
 	return QDF_STATUS_SUCCESS;
 }
 
-void hif_set_ep_intermediate_vote_access(struct hif_opaque_softc *hif_ctx)
+QDF_STATUS hif_set_ep_intermediate_vote_access(struct hif_opaque_softc *hif_ctx)
 {
 	struct hif_softc *scn = HIF_GET_SOFTC(hif_ctx);
 	uint8_t vote_access;
+	QDF_STATUS status;
 
 	vote_access = qdf_atomic_read(&scn->ep_vote_access);
 
@@ -1122,11 +1208,12 @@ void hif_set_ep_intermediate_vote_access(struct hif_opaque_softc *hif_ctx)
 		hif_info("EP vote changed from:%u to intermediate state",
 			 vote_access);
 
-	if (QDF_IS_STATUS_ERROR(hif_try_prevent_ep_vote_access(hif_ctx)))
-		QDF_BUG(0);
-
-	qdf_atomic_set(&scn->ep_vote_access,
+	status = hif_try_prevent_ep_vote_access(hif_ctx);
+	if (QDF_IS_STATUS_SUCCESS(status))
+		qdf_atomic_set(&scn->ep_vote_access,
 		       HIF_EP_VOTE_INTERMEDIATE_ACCESS);
+
+	return status;
 }
 
 void hif_allow_ep_vote_access(struct hif_opaque_softc *hif_ctx)
@@ -2200,4 +2287,17 @@ int hif_system_pm_state_check(struct hif_opaque_softc *hif)
 
 	return 0;
 }
+#endif
+
+#if defined(HIF_CPU_PERF_AFFINE_MASK) || \
+    defined(FEATURE_ENABLE_CE_DP_IRQ_AFFINE)
+void hif_config_irq_set_perf_affinity_hint(
+	struct hif_opaque_softc *hif_ctx)
+{
+	struct hif_softc *scn = HIF_GET_SOFTC(hif_ctx);
+
+	hif_config_irq_affinity(scn);
+}
+
+qdf_export_symbol(hif_config_irq_set_perf_affinity_hint);
 #endif

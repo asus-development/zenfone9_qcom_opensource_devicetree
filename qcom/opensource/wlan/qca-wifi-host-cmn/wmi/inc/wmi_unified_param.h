@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -647,6 +647,18 @@ struct oem_data {
 };
 #endif
 
+#ifdef MULTI_CLIENT_LL_SUPPORT
+/**
+ * struct latency_level_data - latency data received in the event from the FW
+ * @vdev_id: The latency level for specified vdev_id
+ * @latency_level: latency level honoured by FW
+ */
+struct latency_level_data {
+	uint8_t vdev_id;
+	uint32_t latency_level;
+};
+#endif
+
 /**
  * enum nss_chains_band_info - Band info for dynamic nss, chains change feature
  * @NSS_CHAINS_BAND_2GHZ: 2.4Ghz band
@@ -1045,6 +1057,7 @@ struct peer_assoc_ml_partner_links {
  * @peer_eht_mcs_count: Peer EHT MCS TX/RX MAP count
  * @peer_eht_rx_mcs_set: Peer EHT RX MCS MAP
  * @peer_eht_tx_mcs_set: Peer EHT TX MCS MAP
+ * @puncture_bitmap: 11be static puncture bitmap
  * @peer_ppet: Peer HE PPET info
  * @peer_bss_max_idle_option: Peer BSS Max Idle option update
  * @akm: AKM info
@@ -1123,7 +1136,7 @@ struct peer_assoc_params {
 	uint32_t peer_eht_mcs_count;
 	uint32_t peer_eht_rx_mcs_set[WMI_HOST_MAX_EHT_RATE_SET];
 	uint32_t peer_eht_tx_mcs_set[WMI_HOST_MAX_EHT_RATE_SET];
-	uint16_t puncture_pattern;
+	uint16_t puncture_bitmap;
 #endif
 	struct wmi_host_ppe_threshold peer_ppet;
 	u_int8_t peer_bsscolor_rept_info;
@@ -1170,7 +1183,7 @@ struct scan_chan_list_params {
 	uint16_t nallchans;
 	bool append;
 	bool max_bw_support_present;
-	struct channel_param ch_param[1];
+	QDF_FLEX_ARRAY(struct channel_param, ch_param);
 };
 
 #ifdef QCA_SUPPORT_AGILE_DFS
@@ -3455,6 +3468,34 @@ enum wmi_ratemask_type {
 };
 
 /**
+ * enum peer_txq_flush_policy - Peer flush policy values
+ * @PEER_TXQ_FLUSH_POLICY_NONE: No policy configured for peer TID queues
+ * @PEER_TXQ_FLUSH_POLICY_TWT_SP_END: flush peer TID queues after SP end
+ *
+ * This is mapped to 'flush_policy' in WMI_PEER_FLUSH_POLICY_CMDID
+ */
+enum peer_txq_flush_policy {
+	PEER_TXQ_FLUSH_POLICY_NONE = 0,
+	PEER_TXQ_FLUSH_POLICY_TWT_SP_END = 1,
+	/*keep last */
+	PEER_TXQ_FLUSH_POLICY_INVALID,
+};
+
+/**
+ * struct peer_txq_flush_config_params: Peer TXQ flush configuration parameters
+ * @vdev_id: vdev id
+ * @peer: Peer mac address
+ * @tid_mask: TID queues of the peer being configured
+ * @policy: Policy to be applied
+ */
+struct peer_txq_flush_config_params {
+	uint8_t vdev_id;
+	uint8_t peer[QDF_MAC_ADDR_SIZE];
+	uint32_t tid_mask;
+	enum peer_txq_flush_policy policy;
+};
+
+/**
  * enum gpio_pull_type - GPIO PULL TYPE
  * @WMI_HOST_GPIO_PULL_NONE: set gpio pull type to none
  * @WMI_HOST_GPIO_PULL_UP: set gpio to pull up
@@ -4158,7 +4199,7 @@ typedef struct {
 	uint32_t flag;
 	uint32_t payload_len;
 	uint32_t buffer_len;
-	uint8_t buffer[1];
+	QDF_FLEX_ARRAY(uint8_t, buffer);
 } wmi_unit_test_event;
 
 
@@ -4733,6 +4774,12 @@ typedef enum {
 #ifdef WLAN_FEATURE_11BE_MLO
 	wmi_vdev_quiet_offload_eventid,
 #endif
+#ifdef MULTI_CLIENT_LL_SUPPORT
+	wmi_vdev_latency_event_id,
+#endif
+#ifdef WLAN_FEATURE_COAP
+	wmi_wow_coap_buf_info_eventid,
+#endif
 	wmi_events_max,
 } wmi_conv_event_id;
 
@@ -5060,6 +5107,18 @@ typedef enum {
 	wmi_vdev_param_set_eht_range_ext,
 	wmi_vdev_param_set_non_data_eht_range_ext,
 #endif
+#ifdef MULTI_CLIENT_LL_SUPPORT
+	wmi_vdev_param_set_normal_latency_flags_config,
+	wmi_vdev_param_set_xr_latency_flags_config,
+	wmi_vdev_param_set_low_latency_flags_config,
+	wmi_vdev_param_set_ultra_low_latency_flags_config,
+	wmi_vdev_param_set_normal_latency_ul_dl_config,
+	wmi_vdev_param_set_xr_latency_ul_dl_config,
+	wmi_vdev_param_set_low_latency_ul_dl_config,
+	wmi_vdev_param_set_ultra_low_latency_ul_dl_config,
+	wmi_vdev_param_set_default_ll_config,
+	wmi_vdev_param_set_multi_client_ll_feature_config,
+#endif
 } wmi_conv_vdev_param_id;
 
 /**
@@ -5353,6 +5412,21 @@ typedef enum {
 	wmi_service_pno_scan_conf_per_ch_support,
 #ifdef WLAN_FEATURE_11BE_MLO
 	wmi_service_mlo_sta_nan_ndi_support,
+#endif
+#ifdef WIFI_POS_CONVERGED
+	wmi_service_rtt_11az_mac_phy_sec_support,
+	wmi_service_rtt_11az_mac_sec_support,
+	wmi_service_rtt_11az_ntb_support,
+	wmi_service_rtt_11az_tb_support,
+#endif
+#ifdef WLAN_FEATURE_ROAM_OFFLOAD
+	wmi_service_roam_stats_per_candidate_frame_info,
+#endif
+#ifdef MULTI_CLIENT_LL_SUPPORT
+	wmi_service_configure_multi_client_ll_support,
+#endif
+#ifdef WLAN_FEATURE_ROAM_OFFLOAD
+	wmi_service_5ghz_hi_rssi_roam_support,
 #endif
 	wmi_services_max,
 } wmi_conv_service_ids;
@@ -5731,7 +5805,7 @@ typedef struct {
  */
 typedef struct {
 	uint32_t num_entry;
-	wmi_host_mcast_ageout_entry entry[1];
+	QDF_FLEX_ARRAY(wmi_host_mcast_ageout_entry, entry);
 } wmi_host_mcast_list_ageout_event;
 
 /**
@@ -5759,7 +5833,7 @@ typedef struct {
 	uint32_t frag_id;
 	uint32_t more_frag;
 	uint32_t buf_len;
-	uint32_t buf_info[1];
+	QDF_FLEX_ARRAY(uint32_t, buf_info);
 } wmi_host_pdev_generic_buffer_event;
 /**
  * Enum for host buffer event
@@ -7609,14 +7683,14 @@ struct wmi_roam_scan_stats_params {
  */
 struct wmi_roam_scan_stats_res {
 	uint32_t num_roam_scans;
-	struct wmi_roam_scan_stats_params roam_scan[0];
+	struct wmi_roam_scan_stats_params roam_scan[];
 };
 
 #define MAX_ROAM_CANDIDATE_AP    9
 #define MAX_ROAM_SCAN_CHAN       38
 #define MAX_ROAM_SCAN_STATS_TLV  5
 #define WLAN_MAX_BTM_CANDIDATE   8
-#define WLAN_ROAM_MAX_FRAME_INFO 6
+#define WLAN_ROAM_MAX_FRAME_INFO (MAX_ROAM_CANDIDATE_AP * 6)
 /**
  * struct btm_req_candidate_info  - BTM request candidate
  * info

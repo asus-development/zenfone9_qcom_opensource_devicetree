@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -224,6 +225,26 @@
 /* MGMT Rx REO feature capability */
 #define WLAN_SOC_F_MGMT_RX_REO_CAPABLE  0x40000000
 
+/* 11AZ Secure ranging Feature flags */
+/* 11AZ Non-Trigger based ranging support */
+#define WLAN_RTT_11AZ_NTB_SUPPORT 0x80000000
+
+/*
+ * Feature flags are exhausted. Add EXT feature caps below to extend
+ * the feature flags
+ */
+/* 11AZ Trigger based ranging support */
+#define WLAN_RTT_11AZ_TB_SUPPORT  0x00000001
+/* 11AZ Secure ranging PASN Support */
+#define WLAN_RTT_11AZ_MAC_SEC_SUPPORT    0x00000002
+/* 11AZ Secure ranging PHY Security support */
+#define WLAN_RTT_11AZ_MAC_PHY_SEC_SUPPORT 0x00000004
+
+/* Roam Frame info stats - per candidate frames support */
+#define WLAN_ROAM_STATS_FRAME_INFO_PER_CANDIDATE  0x00000008
+/* multi client feature flags support */
+#define WLAN_SOC_WLM_MULTI_CLIENT_LL_SUPPORT      0x00000010
+
 /* PSOC op flags */
 
 	/* Invalid VHT cap */
@@ -283,6 +304,7 @@ struct wlan_objmgr_psoc_user_config {
  * @phy_type:        OL/DA type
  * @soc_fw_caps:     FW capabilities
  * @soc_fw_ext_caps: FW ext capabilities
+ * @soc_fw_ext2_caps: FW ext2 capabilities
  * @soc_feature_caps:Feature capabilities
  * @soc_op_flags:    Flags to set/reset during operation
  * @soc_hw_macaddr[]:HW MAC address
@@ -293,6 +315,7 @@ struct wlan_objmgr_psoc_nif {
 	WLAN_DEV_TYPE phy_type;
 	uint32_t soc_fw_caps;
 	uint32_t soc_fw_ext_caps;
+	uint32_t soc_fw_ext2_caps;
 	uint32_t soc_feature_caps;
 	uint32_t soc_op_flags;
 	uint8_t soc_hw_macaddr[QDF_MAC_ADDR_SIZE];
@@ -1079,7 +1102,7 @@ struct wlan_objmgr_vdev *wlan_objmgr_get_vdev_by_id_from_psoc_not_log_del(
 #ifdef WLAN_OBJMGR_REF_ID_TRACE
 struct wlan_objmgr_vdev *wlan_objmgr_get_vdev_by_macaddr_from_psoc_debug(
 		struct wlan_objmgr_psoc *psoc, uint8_t pdev_id,
-		uint8_t *macaddr, wlan_objmgr_ref_dbgid dbg_id,
+		const uint8_t *macaddr, wlan_objmgr_ref_dbgid dbg_id,
 		const char *func, int line);
 
 #define wlan_objmgr_get_vdev_by_macaddr_from_psoc(psoc, pdev_id, macaddr, \
@@ -1089,7 +1112,7 @@ struct wlan_objmgr_vdev *wlan_objmgr_get_vdev_by_macaddr_from_psoc_debug(
 #else
 struct wlan_objmgr_vdev *wlan_objmgr_get_vdev_by_macaddr_from_psoc(
 		struct wlan_objmgr_psoc *psoc, uint8_t pdev_id,
-		uint8_t *macaddr, wlan_objmgr_ref_dbgid dbg_id);
+		const uint8_t *macaddr, wlan_objmgr_ref_dbgid dbg_id);
 #endif
 
 /**
@@ -1114,7 +1137,7 @@ struct wlan_objmgr_vdev *wlan_objmgr_get_vdev_by_macaddr_from_psoc(
 struct wlan_objmgr_vdev
 	*wlan_objmgr_get_vdev_by_macaddr_from_psoc_no_state_debug(
 		struct wlan_objmgr_psoc *psoc, uint8_t pdev_id,
-		uint8_t *macaddr, wlan_objmgr_ref_dbgid dbg_id,
+		const uint8_t *macaddr, wlan_objmgr_ref_dbgid dbg_id,
 		const char *func, int line);
 
 #define wlan_objmgr_get_vdev_by_macaddr_from_psoc_no_state(psoc, pdev_id, \
@@ -1124,7 +1147,7 @@ struct wlan_objmgr_vdev
 #else
 struct wlan_objmgr_vdev *wlan_objmgr_get_vdev_by_macaddr_from_psoc_no_state(
 		struct wlan_objmgr_psoc *psoc, uint8_t pdev_id,
-		uint8_t *macaddr, wlan_objmgr_ref_dbgid dbg_id);
+		const uint8_t *macaddr, wlan_objmgr_ref_dbgid dbg_id);
 #endif
 
 /**
@@ -1308,6 +1331,52 @@ static inline uint8_t wlan_psoc_nif_fw_ext_cap_get(
 		struct wlan_objmgr_psoc *psoc, uint32_t ext_cap)
 {
 	return (psoc->soc_nif.soc_fw_ext_caps & ext_cap) ? 1 : 0;
+}
+
+/**
+ * wlan_psoc_nif_fw_ext2_cap_set() - set fw ext2 caps
+ * @psoc: PSOC object
+ * @ext2_cap: capability flag to be set
+ *
+ * API to set fw ext caps in psoc
+ *
+ * Return: void
+ */
+static inline void wlan_psoc_nif_fw_ext2_cap_set(struct wlan_objmgr_psoc *psoc,
+						 uint32_t ext2_cap)
+{
+	psoc->soc_nif.soc_fw_ext2_caps |= ext2_cap;
+}
+
+/**
+ * wlan_psoc_nif_fw_ext2_cap_clear() - clear fw ext2 caps
+ * @psoc: PSOC object
+ * @ext2_cap: capability flag to be cleared
+ *
+ * API to clear fw ext caps in psoc
+ *
+ * Return: void
+ */
+static inline void
+wlan_psoc_nif_fw_ext2_cap_clear(struct wlan_objmgr_psoc *psoc,
+				uint32_t ext2_cap)
+{
+	psoc->soc_nif.soc_fw_ext2_caps &= ~ext2_cap;
+}
+
+/**
+ * wlan_psoc_nif_fw_ext2_cap_get() - get fw caps
+ * @psoc: PSOC object
+ * @ext2_cap: capability flag to be checked
+ *
+ * API to know, whether particular fw caps flag is set in psoc
+ *
+ * Return: 1 (for set) or 0 (for not set)
+ */
+static inline uint8_t
+wlan_psoc_nif_fw_ext2_cap_get(struct wlan_objmgr_psoc *psoc, uint32_t ext2_cap)
+{
+	return (psoc->soc_nif.soc_fw_ext2_caps & ext2_cap) ? 1 : 0;
 }
 
 /**

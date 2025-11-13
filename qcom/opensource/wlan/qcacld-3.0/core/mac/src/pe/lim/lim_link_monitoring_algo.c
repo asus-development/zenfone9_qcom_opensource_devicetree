@@ -93,9 +93,19 @@ static void lim_delete_sta_util(struct mac_context *mac_ctx, tpDeleteStaContext 
 			pe_err("Inv Del STA assocId: %d", msg->assocId);
 			return;
 		} else {
-			lim_send_disassoc_mgmt_frame(mac_ctx,
-				REASON_DISASSOC_DUE_TO_INACTIVITY,
-				stads->staAddr, session_entry, false);
+			if (stads->ocv_enabled && stads->last_ocv_done_freq !=
+			    session_entry->curr_op_freq) {
+				lim_send_deauth_mgmt_frame(
+						mac_ctx,
+						REASON_PREV_AUTH_NOT_VALID,
+						stads->staAddr,
+						session_entry, false);
+			} else {
+				lim_send_disassoc_mgmt_frame(
+					mac_ctx,
+					REASON_DISASSOC_DUE_TO_INACTIVITY,
+					stads->staAddr, session_entry, false);
+			}
 			lim_trigger_sta_deletion(mac_ctx, stads, session_entry);
 		}
 	} else {
@@ -361,10 +371,6 @@ lim_tear_down_link_with_ap(struct mac_context *mac, uint8_t sessionId,
 	 */
 	pe_session->pmmOffloadInfo.bcnmiss = false;
 
-	pe_info("[wlan]: No ProbeRsp from AP after HB failure. Session %d Vdev %d reason code %d trigger %d",
-		pe_session->peSessionId, pe_session->vdev_id, reasonCode,
-		trigger);
-
 	/* Announce loss of link to Roaming algorithm */
 	/* and cleanup by sending SME_DISASSOC_REQ to SME */
 
@@ -480,7 +486,7 @@ void lim_handle_heart_beat_failure(struct mac_context *mac_ctx,
 			goto hb_handler_fail;
 		}
 		/* Beacon frame not received within heartbeat timeout. */
-		pe_info("[wlan] Heartbeat Failure");
+		pe_warn("Heartbeat Failure");
 		mac_ctx->lim.gLimHBfailureCntInLinkEstState++;
 
 		/*

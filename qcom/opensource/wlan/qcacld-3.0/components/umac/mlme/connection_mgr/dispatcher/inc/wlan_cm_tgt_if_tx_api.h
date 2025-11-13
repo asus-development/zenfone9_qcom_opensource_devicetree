@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -48,6 +48,65 @@ wlan_cm_roam_send_set_vdev_pcl(struct wlan_objmgr_psoc *psoc,
  */
 QDF_STATUS wlan_cm_tgt_send_roam_rt_stats_config(struct wlan_objmgr_psoc *psoc,
 						 struct roam_disable_cfg *req);
+
+/**
+ * wlan_cm_tgt_send_roam_ho_delay_config() - Send roam HO delay config command
+ * to FW
+ * @psoc: psoc pointer
+ * @vdev_id: vdev id
+ * @roam_ho_delay: roam hand-off delay value
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS wlan_cm_tgt_send_roam_ho_delay_config(struct wlan_objmgr_psoc *psoc,
+						 uint8_t vdev_id,
+						 uint16_t roam_ho_delay);
+
+/**
+ * wlan_cm_tgt_exclude_rm_partial_scan_freq() - Exclude the channels in roam
+ * full scan that are already scanned as part of partial scan.
+ * @psoc: psoc pointer
+ * @vdev_id: vdev id
+ * @exclude_rm_partial_scan_freq: Exclude the channels in roam full scan that
+ * are already scanned as part of partial scan.
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+wlan_cm_tgt_exclude_rm_partial_scan_freq(struct wlan_objmgr_psoc *psoc,
+					 uint8_t vdev_id,
+					 uint8_t exclude_rm_partial_scan_freq);
+
+/**
+ * wlan_cm_tgt_send_roam_full_scan_6ghz_on_disc() - Include the 6 GHz channels
+ * in roam full scan only on prior discovery of any 6 GHz support in the
+ * environment.
+ * @psoc: PSOC pointer
+ * @roam_inc_6ghz_if_disc: Include the 6 GHz channels in roam full scan:
+ * 1 - Include only on prior discovery of any 6 GHz support in the environment
+ * 0 - Include all the supported 6 GHz channels by default
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+wlan_cm_tgt_send_roam_full_scan_6ghz_on_disc(
+					struct wlan_objmgr_psoc *psoc,
+					uint8_t vdev_id,
+					uint8_t roam_full_scan_6ghz_on_disc);
+
+/**
+ * wlan_cm_tgt_send_roam_scan_offload_rssi_params() - Set the RSSI parameters
+ * for roam offload scan
+ * @vdev: Pointer to vdev object
+ * @roam_rssi_params: structure containing parameters for roam offload scan
+ * based on RSSI
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+wlan_cm_tgt_send_roam_scan_offload_rssi_params(
+		struct wlan_objmgr_vdev *vdev,
+		struct wlan_roam_offload_scan_rssi_params *roam_rssi_params);
 #else
 static inline QDF_STATUS
 wlan_cm_roam_send_set_vdev_pcl(struct wlan_objmgr_psoc *psoc,
@@ -59,6 +118,30 @@ wlan_cm_roam_send_set_vdev_pcl(struct wlan_objmgr_psoc *psoc,
 static inline QDF_STATUS
 wlan_cm_tgt_send_roam_rt_stats_config(struct wlan_objmgr_psoc *psoc,
 				      struct roam_disable_cfg *req)
+{
+	return QDF_STATUS_E_FAILURE;
+}
+
+static inline QDF_STATUS
+wlan_cm_tgt_send_roam_ho_delay_config(struct wlan_objmgr_psoc *psoc,
+				      uint8_t vdev_id, uint16_t roam_ho_delay)
+{
+	return QDF_STATUS_E_FAILURE;
+}
+
+static inline QDF_STATUS
+wlan_cm_tgt_exclude_rm_partial_scan_freq(struct wlan_objmgr_psoc *psoc,
+					 uint8_t vdev_id,
+					 uint8_t exclude_rm_partial_scan_freq)
+{
+	return QDF_STATUS_E_FAILURE;
+}
+
+static inline QDF_STATUS
+wlan_cm_tgt_send_roam_full_scan_6ghz_on_disc(
+					struct wlan_objmgr_psoc *psoc,
+					uint8_t vdev_id,
+					uint8_t roam_full_scan_6ghz_on_disc)
 {
 	return QDF_STATUS_E_FAILURE;
 }
@@ -115,6 +198,18 @@ QDF_STATUS wlan_cm_tgt_send_roam_stop_req(struct wlan_objmgr_psoc *psoc,
 QDF_STATUS wlan_cm_tgt_send_roam_update_req(struct wlan_objmgr_psoc *psoc,
 					   uint8_t vdev_id,
 					   struct wlan_roam_update_config *req);
+/**
+ * wlan_cm_tgt_send_roam_freqs()  - Send roam frequencies to firmware
+ * @psoc: psoc pointer
+ * @vdev_id: vdev id
+ * @req: roam frequency list to be sent to fw
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+wlan_cm_tgt_send_roam_freqs(struct wlan_objmgr_psoc *psoc,
+			    uint8_t vdev_id,
+			    struct wlan_roam_scan_channel_list *req);
 
 /**
  * wlan_cm_tgt_send_roam_abort_req()  - Send roam abort command to firmware
@@ -151,7 +246,19 @@ QDF_STATUS wlan_cm_tgt_send_roam_triggers(struct wlan_objmgr_psoc *psoc,
 					  struct wlan_roam_triggers *req);
 
 /**
- * wlan_cm_tgt_send_roam_triggers()  - Send roam trigger command to FW
+ * wlan_cm_tgt_send_idle_params()  - Send idle roam params command to FW
+ * @psoc: psoc pointer
+ * @vdev_id: vdev id
+ * @params: idle roam params
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS wlan_cm_tgt_send_idle_params(struct wlan_objmgr_psoc *psoc,
+					uint8_t vdev_id,
+					struct wlan_roam_idle_params *params);
+
+/**
+ * wlan_cm_tgt_send_roam_invoke_req()  - Send roam trigger command to FW
  * @psoc: psoc pointer
  * @roam_invoke_req: roam invoke parameter
  *

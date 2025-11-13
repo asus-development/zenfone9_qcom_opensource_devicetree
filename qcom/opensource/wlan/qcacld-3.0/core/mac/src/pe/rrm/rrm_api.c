@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -266,11 +267,19 @@ rrm_process_link_measurement_request(struct mac_context *mac,
 		return QDF_STATUS_E_INVAL;
 	}
 
-	if (wlan_reg_is_ext_tpc_supported(mac->psoc)) {
+	/*
+	 * STA LPI + SAP VLP is supported. For this STA should operate in VLP
+	 * power level of the SAP.
+	 * If STA is operating in VLP power of SAP, do not update STA power.
+	 */
+	if (wlan_reg_is_ext_tpc_supported(mac->psoc) &&
+	    !pe_session->sta_follows_sap_power) {
 		ap_pwr_constraint = mlme_obj->reg_tpc_obj.ap_constraint_power;
 		mlme_obj->reg_tpc_obj.ap_constraint_power =
 				pLinkReq->MaxTxPower.maxTxPower;
-		lim_calculate_tpc(mac, pe_session, true, 0, false);
+		/* Set is_power_constraint_abs to true to calculate tpc power */
+		mlme_obj->reg_tpc_obj.is_power_constraint_abs = true;
+		lim_calculate_tpc(mac, pe_session);
 
 		LinkReport.txPower =
 			mlme_obj->reg_tpc_obj.chan_power_info[0].tx_power;
@@ -287,7 +296,7 @@ rrm_process_link_measurement_request(struct mac_context *mac,
 						      pe_session->vdev_id,
 						      &mlme_obj->reg_tpc_obj);
 		}
-	} else {
+	} else if (!pe_session->sta_follows_sap_power) {
 		mlme_obj->reg_tpc_obj.reg_max[0] =
 				pe_session->def_max_tx_pwr;
 		mlme_obj->reg_tpc_obj.ap_constraint_power =

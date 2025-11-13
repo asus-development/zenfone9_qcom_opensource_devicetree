@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -324,6 +324,7 @@ static void reg_modify_chan_list_for_dfs_channels(
 	}
 }
 
+#ifdef CONFIG_REG_CLIENT
 /**
  * reg_modify_chan_list_for_indoor_channels() - Disable the indoor channels if
  * indoor_chan_enabled flag is set to false.
@@ -348,7 +349,6 @@ static void reg_modify_chan_list_for_indoor_channels(
 			}
 		}
 	}
-
 	if (pdev_priv_obj->force_ssc_disable_indoor_channel &&
 	    pdev_priv_obj->sap_state) {
 		for (chan_enum = 0; chan_enum < NUM_CHANNELS; chan_enum++) {
@@ -364,6 +364,70 @@ static void reg_modify_chan_list_for_indoor_channels(
 		}
 	}
 }
+
+/**
+ *reg_modify_chan_list_for_indoor_concurrency() - Enable/Disable the indoor
+ *channels for SAP operation based on the indoor concurrency list
+ *
+ * @pdev_priv_obj: Pointer to regulatory private pdev structure.
+ */
+static void reg_modify_chan_list_for_indoor_concurrency(
+		struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj)
+{
+	struct indoor_concurrency_list *indoor_list = NULL;
+	struct regulatory_channel *chan_list = pdev_priv_obj->cur_chan_list;
+	enum channel_enum chan, min_enum, max_enum;
+	uint8_t i;
+
+	if (pdev_priv_obj->indoor_chan_enabled ||
+	    !pdev_priv_obj->sta_sap_scc_on_indoor_channel) {
+		return;
+	}
+
+	indoor_list = pdev_priv_obj->indoor_list;
+
+	if (!indoor_list)
+		return;
+
+	for (i = 0; i < MAX_INDOOR_LIST_SIZE; i++, indoor_list++) {
+		if (indoor_list->freq == 0 &&
+		    indoor_list->vdev_id == INVALID_VDEV_ID)
+			continue;
+
+		if (!indoor_list->chan_range) {
+			min_enum =
+				reg_get_chan_enum_for_freq(indoor_list->freq);
+			max_enum = min_enum;
+		} else {
+			min_enum =
+				reg_get_chan_enum_for_freq(
+					indoor_list->chan_range->start_freq);
+			max_enum =
+				reg_get_chan_enum_for_freq(
+					indoor_list->chan_range->end_freq);
+		}
+
+		if (min_enum == NUM_CHANNELS || max_enum == NUM_CHANNELS)
+			continue;
+
+		for (chan = min_enum; chan <= max_enum; chan++) {
+			if (chan_list[chan].chan_flags & REGULATORY_CHAN_INDOOR_ONLY &&
+			    !(chan_list[chan].chan_flags & REGULATORY_CHAN_DISABLED))
+				chan_list[chan].chan_flags &= ~REGULATORY_CHAN_NO_IR;
+		}
+	}
+}
+#else
+static void reg_modify_chan_list_for_indoor_channels(
+		struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj)
+{
+}
+
+static void reg_modify_chan_list_for_indoor_concurrency(
+		struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj)
+{
+}
+#endif
 
 #ifdef CONFIG_BAND_6GHZ
 static void reg_modify_chan_list_for_band_6G(
@@ -741,7 +805,9 @@ static void reg_modify_chan_list_for_cached_channels(
 {
 	uint32_t i, j;
 	uint32_t num_cache_channels = pdev_priv_obj->num_cache_channels;
-	struct regulatory_channel *chan_list = pdev_priv_obj->cur_chan_list;
+	struct regulatory_channel *cur_chan_list = pdev_priv_obj->cur_chan_list;
+	struct regulatory_channel *sec_chan_list =
+					pdev_priv_obj->secondary_cur_chan_list;
 	struct regulatory_channel *cache_chan_list =
 					pdev_priv_obj->cache_disable_chan_list;
 
@@ -749,15 +815,24 @@ static void reg_modify_chan_list_for_cached_channels(
 		return;
 
 	if (pdev_priv_obj->disable_cached_channels) {
-		for (i = 0; i < num_cache_channels; i++)
-			for (j = 0; j < NUM_CHANNELS; j++)
+		for (i = 0; i < num_cache_channels; i++) {
+			for (j = 0; j < NUM_CHANNELS; j++) {
 				if (cache_chan_list[i].center_freq ==
-				    chan_list[j].center_freq) {
-					chan_list[j].state =
+				    cur_chan_list[j].center_freq) {
+					cur_chan_list[j].state =
 							CHANNEL_STATE_DISABLE;
-					chan_list[j].chan_flags |=
+					cur_chan_list[j].chan_flags |=
 						REGULATORY_CHAN_DISABLED;
 				}
+				if (cache_chan_list[i].center_freq ==
+				    sec_chan_list[j].center_freq) {
+					sec_chan_list[j].state =
+							CHANNEL_STATE_DISABLE;
+					sec_chan_list[j].chan_flags |=
+						REGULATORY_CHAN_DISABLED;
+				}
+			}
+		}
 	}
 }
 #else
@@ -1080,6 +1155,10 @@ reg_append_mas_chan_list_for_6g_sp(struct wlan_regulatory_pdev_priv_obj
 			       *pdev_priv_obj)
 {
 	struct regulatory_channel *master_chan_list_6g_client_sp;
+	struct wlan_objmgr_pdev *pdev = pdev_priv_obj->pdev_ptr;
+
+	if (!wlan_reg_is_afc_power_event_received(pdev))
+		return;
 
 	master_chan_list_6g_client_sp = pdev_priv_obj->afc_chan_list;
 
@@ -1089,10 +1168,35 @@ reg_append_mas_chan_list_for_6g_sp(struct wlan_regulatory_pdev_priv_obj
 		     sizeof(struct regulatory_channel));
 }
 #else
-static inline void
+static void
 reg_append_mas_chan_list_for_6g_sp(struct wlan_regulatory_pdev_priv_obj
 			       *pdev_priv_obj)
 {
+	struct regulatory_channel *master_chan_list_6g_client_sp;
+	uint8_t i, j;
+
+	if (!pdev_priv_obj->reg_rules.num_of_6g_client_reg_rules[REG_STANDARD_POWER_AP]) {
+		reg_debug("No SP reg rules");
+		return;
+	}
+
+	master_chan_list_6g_client_sp =
+		pdev_priv_obj->mas_chan_list_6g_client[REG_STANDARD_POWER_AP]
+			[pdev_priv_obj->reg_cur_6g_client_mobility_type];
+
+	for (i = MIN_6GHZ_CHANNEL, j = 0;
+	     i <= MAX_6GHZ_CHANNEL && j < NUM_6GHZ_CHANNELS; i++, j++) {
+		if (pdev_priv_obj->mas_chan_list[i].state ==
+		    CHANNEL_STATE_DISABLE ||
+		    pdev_priv_obj->mas_chan_list[i].chan_flags &
+		    REGULATORY_CHAN_DISABLED) {
+			qdf_mem_copy(&pdev_priv_obj->mas_chan_list[i],
+				     &master_chan_list_6g_client_sp[j],
+				     sizeof(struct regulatory_channel));
+			pdev_priv_obj->mas_chan_list[i].power_type =
+							REG_STANDARD_POWER_AP;
+		}
+	}
 }
 #endif
 
@@ -1112,7 +1216,7 @@ reg_append_mas_chan_list_for_6g_lpi(struct wlan_regulatory_pdev_priv_obj
 	struct regulatory_channel *master_chan_list_6g_client_lpi;
 	uint8_t i, j;
 
-	if (!pdev_priv_obj->reg_rules.num_of_6g_ap_reg_rules[REG_INDOOR_AP]) {
+	if (!pdev_priv_obj->reg_rules.num_of_6g_client_reg_rules[REG_INDOOR_AP]) {
 		reg_debug("No LPI reg rules");
 		return;
 	}
@@ -1130,6 +1234,8 @@ reg_append_mas_chan_list_for_6g_lpi(struct wlan_regulatory_pdev_priv_obj
 			qdf_mem_copy(&pdev_priv_obj->mas_chan_list[i],
 				     &master_chan_list_6g_client_lpi[j],
 				     sizeof(struct regulatory_channel));
+			pdev_priv_obj->mas_chan_list[i].power_type =
+							REG_INDOOR_AP;
 		}
 	}
 }
@@ -1150,7 +1256,7 @@ reg_append_mas_chan_list_for_6g_vlp(struct wlan_regulatory_pdev_priv_obj
 	struct regulatory_channel *master_chan_list_6g_client_vlp;
 	uint8_t i, j;
 
-	if (!pdev_priv_obj->reg_rules.num_of_6g_ap_reg_rules[REG_VERY_LOW_POWER_AP]) {
+	if (!pdev_priv_obj->reg_rules.num_of_6g_client_reg_rules[REG_VERY_LOW_POWER_AP]) {
 		reg_debug("No VLP reg rules");
 		return;
 	}
@@ -1168,6 +1274,8 @@ reg_append_mas_chan_list_for_6g_vlp(struct wlan_regulatory_pdev_priv_obj
 			qdf_mem_copy(&pdev_priv_obj->mas_chan_list[i],
 				     &master_chan_list_6g_client_vlp[j],
 				     sizeof(struct regulatory_channel));
+			pdev_priv_obj->mas_chan_list[i].power_type =
+							REG_VERY_LOW_POWER_AP;
 		}
 	}
 }
@@ -1176,6 +1284,8 @@ static void
 reg_append_mas_chan_list_for_6g(struct wlan_regulatory_pdev_priv_obj
 				*pdev_priv_obj)
 {
+	struct wlan_objmgr_pdev *pdev = pdev_priv_obj->pdev_ptr;
+
 	if (pdev_priv_obj->reg_cur_6g_ap_pwr_type >= REG_CURRENT_MAX_AP_TYPE ||
 	    pdev_priv_obj->reg_cur_6g_client_mobility_type >=
 	    REG_MAX_CLIENT_TYPE) {
@@ -1188,7 +1298,9 @@ reg_append_mas_chan_list_for_6g(struct wlan_regulatory_pdev_priv_obj
 	 * given to AFC power type and then second priority is decided based on
 	 * gindoor_channel_support ini value
 	 */
-	reg_append_mas_chan_list_for_6g_sp(pdev_priv_obj);
+
+	if (wlan_reg_is_afc_power_event_received(pdev))
+		reg_append_mas_chan_list_for_6g_sp(pdev_priv_obj);
 
 	if (pdev_priv_obj->indoor_chan_enabled) {
 		reg_append_mas_chan_list_for_6g_lpi(pdev_priv_obj);
@@ -1197,6 +1309,9 @@ reg_append_mas_chan_list_for_6g(struct wlan_regulatory_pdev_priv_obj
 		reg_append_mas_chan_list_for_6g_vlp(pdev_priv_obj);
 		reg_append_mas_chan_list_for_6g_lpi(pdev_priv_obj);
 	}
+
+	if (!wlan_reg_is_afc_power_event_received(pdev))
+		reg_append_mas_chan_list_for_6g_sp(pdev_priv_obj);
 }
 
 static void
@@ -1730,6 +1845,34 @@ reg_modify_chan_list_for_avoid_chan_ext(struct wlan_regulatory_pdev_priv_obj
 }
 #endif
 
+#ifdef CONFIG_REG_CLIENT
+/*
+ * reg_modify_sp_channels() - Mark 6 GHz channels NO_IR and set state DFS
+ * if power type is SP
+ * @chan_list: Pdev current channel list
+ *
+ * Return: None
+ */
+static
+void reg_modify_sp_channels(struct regulatory_channel *chan_list)
+{
+	int i;
+
+	for (i = MIN_6GHZ_CHANNEL; i <= MAX_6GHZ_CHANNEL ; i++) {
+		if (chan_list[i].power_type == REG_STANDARD_POWER_AP &&
+		    chan_list[i].state != CHANNEL_STATE_DISABLE) {
+			chan_list[i].state = CHANNEL_STATE_DFS;
+			chan_list[i].chan_flags |= REGULATORY_CHAN_NO_IR;
+		}
+	}
+}
+#else
+static inline
+void reg_modify_sp_channels(struct regulatory_channel *chan_list)
+{
+}
+#endif
+
 void reg_compute_pdev_current_chan_list(struct wlan_regulatory_pdev_priv_obj
 					*pdev_priv_obj)
 {
@@ -1740,6 +1883,7 @@ void reg_compute_pdev_current_chan_list(struct wlan_regulatory_pdev_priv_obj
 	qdf_mem_copy(pdev_priv_obj->cur_chan_list, pdev_priv_obj->mas_chan_list,
 		     NUM_CHANNELS * sizeof(struct regulatory_channel));
 
+	reg_modify_sp_channels(pdev_priv_obj->cur_chan_list);
 	reg_modify_chan_list_for_freq_range(pdev_priv_obj->cur_chan_list,
 					    pdev_priv_obj->range_2g_low,
 					    pdev_priv_obj->range_2g_high,
@@ -1758,13 +1902,13 @@ void reg_compute_pdev_current_chan_list(struct wlan_regulatory_pdev_priv_obj
 
 	reg_modify_chan_list_for_indoor_channels(pdev_priv_obj);
 
+	reg_modify_chan_list_for_indoor_concurrency(pdev_priv_obj);
+
 	reg_modify_chan_list_for_fcc_channel(pdev_priv_obj->cur_chan_list,
 					     pdev_priv_obj->set_fcc_channel);
 
 	reg_modify_chan_list_for_chan_144(pdev_priv_obj->cur_chan_list,
 					  pdev_priv_obj->en_chan_144);
-
-	reg_modify_chan_list_for_cached_channels(pdev_priv_obj);
 
 	reg_modify_chan_list_for_srd_channels(pdev_priv_obj->pdev_ptr,
 					      pdev_priv_obj->cur_chan_list);
@@ -1781,6 +1925,8 @@ void reg_compute_pdev_current_chan_list(struct wlan_regulatory_pdev_priv_obj
 						  cur_chan_list);
 
 	reg_populate_secondary_cur_chan_list(pdev_priv_obj);
+
+	reg_modify_chan_list_for_cached_channels(pdev_priv_obj);
 
 	reg_modify_chan_list_for_avoid_chan_ext(pdev_priv_obj);
 }
@@ -1836,18 +1982,30 @@ static void reg_append_6g_reg_rules_in_pdev(
 			struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj)
 {
 	struct reg_rule_info *pdev_reg_rules;
-	enum reg_6g_ap_type cur_pwr_type = REG_INDOOR_AP;
+	enum reg_6g_ap_type cur_pwr_type;
 	uint8_t num_reg_rules;
+	uint8_t *num_6ghz_reg_rules;
 
 	pdev_reg_rules = &pdev_priv_obj->reg_rules;
 
 	num_reg_rules = pdev_reg_rules->num_of_reg_rules;
+	num_6ghz_reg_rules = pdev_reg_rules->num_of_6g_client_reg_rules;
+
+	if (num_6ghz_reg_rules[REG_INDOOR_AP])
+		cur_pwr_type = REG_INDOOR_AP;
+	else if (num_6ghz_reg_rules[REG_VERY_LOW_POWER_AP])
+		cur_pwr_type = REG_VERY_LOW_POWER_AP;
+	else if (num_6ghz_reg_rules[REG_STANDARD_POWER_AP])
+		cur_pwr_type = REG_STANDARD_POWER_AP;
+	else
+		return;
+
 	pdev_reg_rules->num_of_reg_rules +=
 		pdev_reg_rules->num_of_6g_client_reg_rules[cur_pwr_type];
 
 	qdf_mem_copy(&pdev_reg_rules->reg_rules[num_reg_rules],
 		     pdev_reg_rules->reg_rules_6g_client[cur_pwr_type],
-		     pdev_reg_rules->num_of_6g_client_reg_rules[cur_pwr_type] *
+		     num_6ghz_reg_rules[cur_pwr_type] *
 		     sizeof(struct cur_reg_rule));
 }
 
@@ -2569,6 +2727,11 @@ QDF_STATUS reg_process_master_chan_list_ext(
 	}
 
 	reg_store_regulatory_ext_info_to_socpriv(soc_reg, regulat_info, phy_id);
+
+	if (this_mchan_params->client_type >= REG_MAX_CLIENT_TYPE) {
+		reg_err("6 GHz reg client type invalid");
+		return QDF_STATUS_E_FAILURE;
+	}
 
 	status = reg_fill_master_channels(regulat_info,
 					  &this_mchan_params->reg_rules,

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -283,10 +283,12 @@ QDF_STATUS cm_roam_control_restore_default_config(struct wlan_objmgr_pdev *pdev,
  * cm_update_pmk_cache_ft - API to update MDID in PMKSA cache entry
  * @psoc: psoc pointer
  * @vdev_id: dvev ID
+ * @pmk_cache: pmksa from the userspace
  *
  * Return: None
  */
-void cm_update_pmk_cache_ft(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id);
+void cm_update_pmk_cache_ft(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
+			    struct wlan_crypto_pmksa *pmk_cache);
 
 /**
  * cm_lookup_pmkid_using_bssid() - lookup pmkid using bssid
@@ -327,10 +329,87 @@ cm_roam_send_disable_config(struct wlan_objmgr_psoc *psoc,
 QDF_STATUS
 cm_roam_send_rt_stats_config(struct wlan_objmgr_psoc *psoc,
 			     uint8_t vdev_id, uint8_t param_value);
+
+/**
+ * cm_roam_send_ho_delay_config() - Send HO delay value to FW to delay
+ * hand-off (in msec) by the specified duration to receive pending rx frames
+ * from current BSS.
+ * @psoc: PSOC pointer
+ * @vdev_id: vdev id
+ * @param_value: HO delay value
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+cm_roam_send_ho_delay_config(struct wlan_objmgr_psoc *psoc,
+			     uint8_t vdev_id, uint16_t param_value);
+
+/**
+ * cm_exclude_rm_partial_scan_freq() - Exclude the channels in roam full scan
+ * that are already scanned as part of partial scan.
+ * @psoc: PSOC pointer
+ * @vdev_id: vdev id
+ * @param_value: include/exclude the partial scan channels in roam full scan
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+cm_exclude_rm_partial_scan_freq(struct wlan_objmgr_psoc *psoc,
+				uint8_t vdev_id, uint8_t param_value);
+
+/**
+ * cm_roam_full_scan_6ghz_on_disc() - Include the 6 GHz channels in roam full
+ * scan only on prior discovery of any 6 GHz support in the environment
+ * @psoc: PSOC pointer
+ * @vdev_id: vdev id
+ * @param_value: Include the 6 GHz channels in roam full scan:
+ * 1 - Include only on prior discovery of any 6 GHz support in the environment
+ * 0 - Include all the supported 6 GHz channels by default
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS cm_roam_full_scan_6ghz_on_disc(struct wlan_objmgr_psoc *psoc,
+					  uint8_t vdev_id, uint8_t param_value);
+
+/**
+ * cm_set_roam_scan_high_rssi_offset() - Set the delta change in high RSSI at
+ * which roam scan is triggered in 2.4/5 GHz.
+ * @psoc: PSOC pointer
+ * @vdev_id: vdev id
+ * @param_value: Set the High RSSI delta for roam scan trigger
+ * * 1-16 - Set an offset value in this range
+ * * 0    - Disable
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+cm_set_roam_scan_high_rssi_offset(struct wlan_objmgr_psoc *psoc,
+				  uint8_t vdev_id, uint8_t param_value);
 #else
 static inline QDF_STATUS
 cm_roam_send_rt_stats_config(struct wlan_objmgr_psoc *psoc,
 			     uint8_t vdev_id, uint8_t param_value)
+{
+	return QDF_STATUS_E_NOSUPPORT;
+}
+
+static inline QDF_STATUS
+cm_roam_send_ho_delay_config(struct wlan_objmgr_psoc *psoc,
+			     uint8_t vdev_id, uint16_t param_value)
+{
+	return QDF_STATUS_E_NOSUPPORT;
+}
+
+static inline QDF_STATUS
+cm_exclude_rm_partial_scan_freq(struct wlan_objmgr_psoc *psoc,
+				uint8_t vdev_id, uint8_t param_value)
+{
+	return QDF_STATUS_E_NOSUPPORT;
+}
+
+static inline
+QDF_STATUS cm_roam_full_scan_6ghz_on_disc(struct wlan_objmgr_psoc *psoc,
+					  uint8_t vdev_id, uint8_t param_value)
 {
 	return QDF_STATUS_E_NOSUPPORT;
 }
@@ -347,11 +426,14 @@ cm_store_sae_single_pmk_to_global_cache(struct wlan_objmgr_psoc *psoc,
  * with same pmk or not
  * @psoc: psoc
  * @vdev_id: vdev id
+ * @psk_pmk: pmk of roamed AP
+ * @pmk_len: pml length
  *
  * Return: void
  */
 void cm_check_and_set_sae_single_pmk_cap(struct wlan_objmgr_psoc *psoc,
-					 uint8_t vdev_id);
+					 uint8_t vdev_id, uint8_t *psk_pmk,
+					 uint8_t pmk_len);
 #else
 static inline void
 cm_store_sae_single_pmk_to_global_cache(struct wlan_objmgr_psoc *psoc,
@@ -360,7 +442,8 @@ cm_store_sae_single_pmk_to_global_cache(struct wlan_objmgr_psoc *psoc,
 {}
 static inline void
 cm_check_and_set_sae_single_pmk_cap(struct wlan_objmgr_psoc *psoc,
-				    uint8_t vdev_id)
+				    uint8_t vdev_id, uint8_t *psk_pmk,
+				    uint8_t pmk_len)
 {}
 #endif
 
@@ -498,4 +581,20 @@ cm_roam_beacon_loss_disconnect_event(struct wlan_objmgr_psoc *psoc,
 	return QDF_STATUS_E_NOSUPPORT;
 }
 #endif /* FEATURE_CONNECTIVITY_LOGGING */
+
+/**
+ * cm_fill_rso_channel_list() - Fill roam frequencies in chan_info
+ * @psoc: PSOC pointer
+ * @vdev: vdev pointer
+ * @rso_cfg: roam config
+ * @chan_info: roam scan channel list
+ * @reason: Channel update reason
+ *
+ * Return: None
+ */
+void cm_fill_rso_channel_list(struct wlan_objmgr_psoc *psoc,
+			      struct wlan_objmgr_vdev *vdev,
+			      struct rso_config *rso_cfg,
+			      struct wlan_roam_scan_channel_list *chan_info,
+			      uint8_t reason);
 #endif /* _WLAN_CM_ROAM_OFFLOAD_H_ */

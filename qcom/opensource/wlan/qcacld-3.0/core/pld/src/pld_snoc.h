@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -20,6 +20,15 @@
 #ifndef __PLD_SNOC_H__
 #define __PLD_SNOC_H__
 
+#ifdef CONFIG_CNSS_OUT_OF_TREE
+#ifdef CONFIG_PLD_SNOC_ICNSS
+#ifdef CONFIG_PLD_SNOC_ICNSS2
+#include "icnss2.h"
+#else
+#include "icnss.h"
+#endif
+#endif
+#else
 #ifdef CONFIG_PLD_SNOC_ICNSS
 #ifdef CONFIG_PLD_SNOC_ICNSS2
 #include <soc/qcom/icnss2.h>
@@ -27,6 +36,8 @@
 #include <soc/qcom/icnss.h>
 #endif
 #endif
+#endif
+
 #include "pld_internal.h"
 
 #ifndef CONFIG_PLD_SNOC_ICNSS
@@ -155,6 +166,12 @@ static inline int pld_snoc_is_fw_down(struct device *dev)
 {
 	return 0;
 }
+
+static inline int pld_snoc_is_low_power_mode(struct device *dev)
+{
+	return 0;
+}
+
 static inline int pld_snoc_set_fw_log_mode(struct device *dev, u8 fw_log_mode)
 {
 	return 0;
@@ -334,6 +351,18 @@ static inline int pld_snoc_is_fw_down(struct device *dev)
 {
 	return icnss_is_fw_down();
 }
+
+#ifdef CONFIG_ENABLE_LOW_POWER_MODE
+static inline int pld_snoc_is_low_power_mode(struct device *dev)
+{
+	return icnss_is_low_power();
+}
+#else
+static inline int pld_snoc_is_low_power_mode(struct device *dev)
+{
+	return 0;
+}
+#endif
 
 static inline int pld_snoc_is_qmi_disable(struct device *dev)
 {

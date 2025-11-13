@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -62,6 +62,15 @@ static QDF_STATUS policy_mgr_init_cfg(struct wlan_objmgr_psoc *psoc)
 		cfg_get(psoc, CFG_FORCE_1X1_FEATURE);
 	cfg->sta_sap_scc_on_dfs_chnl =
 		cfg_get(psoc, CFG_STA_SAP_SCC_ON_DFS_CHAN);
+
+	/*
+	 * Override concurrency sta+sap indoor flag to true if global indoor
+	 * flag is true
+	 */
+	cfg->sta_sap_scc_on_indoor_channel =
+		cfg_get(psoc, CFG_STA_SAP_SCC_ON_INDOOR_CHAN);
+	if (cfg_get(psoc, CFG_INDOOR_CHANNEL_SUPPORT))
+		cfg->sta_sap_scc_on_indoor_channel = true;
 
 	/*
 	 * Force set sta_sap_scc_on_dfs_chnl on Non-DBS HW so that standalone
@@ -249,4 +258,24 @@ ucfg_policy_mgr_get_indoor_chnl_marking(struct wlan_objmgr_psoc *psoc,
 					uint8_t *indoor_chnl_marking)
 {
 	return policy_mgr_get_indoor_chnl_marking(psoc, indoor_chnl_marking);
+}
+
+bool
+ucfg_policy_mgr_get_sta_sap_scc_on_indoor_chnl(struct wlan_objmgr_psoc *psoc)
+{
+	return policy_mgr_get_sta_sap_scc_allowed_on_indoor_chnl(psoc) ?
+								true : false;
+}
+
+bool ucfg_policy_mgr_is_fw_supports_dbs(struct wlan_objmgr_psoc *psoc)
+{
+	return policy_mgr_find_if_fw_supports_dbs(psoc);
+}
+
+QDF_STATUS ucfg_policy_mgr_get_dbs_hw_modes(struct wlan_objmgr_psoc *psoc,
+					    bool *one_by_one_dbs,
+					    bool *two_by_two_dbs)
+{
+	return policy_mgr_get_dbs_hw_modes(psoc, one_by_one_dbs,
+					   two_by_two_dbs);
 }

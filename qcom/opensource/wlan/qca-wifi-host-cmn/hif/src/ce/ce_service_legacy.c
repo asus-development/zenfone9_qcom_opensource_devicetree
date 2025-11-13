@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1267,6 +1268,8 @@ static bool ce_check_int_watermark(struct CE_state *CE_state,
 	return false;
 }
 
+void hif_display_ctrl_traffic_pipes_state(struct hif_opaque_softc *hif_ctx) { }
+
 #ifdef HIF_CE_LOG_INFO
 /**
  * ce_get_index_info_legacy(): Get CE index info
@@ -1317,7 +1320,7 @@ struct ce_ops ce_service_legacy = {
 #endif
 };
 
-struct ce_ops *ce_services_legacy()
+struct ce_ops *ce_services_legacy(void)
 {
 	return &ce_service_legacy;
 }

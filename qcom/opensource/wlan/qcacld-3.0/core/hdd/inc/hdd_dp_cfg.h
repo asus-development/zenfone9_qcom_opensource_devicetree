@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -416,13 +416,36 @@
 #ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 /*
  * <ini>
+ * gBusBandwidthSuperHighThreshold - bus bandwidth super high threshold
+ *
+ * @Min: 0
+ * @Max: 4294967295UL
+ * @Default: 22000
+ *
+ * This ini specifies the bus bandwidth super high threshold
+ *
+ * Usage: Internal
+ *
+ * </ini>
+ */
+#define CFG_DP_BUS_BANDWIDTH_SUPER_HIGH_THRESHOLD \
+		CFG_INI_UINT( \
+		"gBusBandwidthSuperHighThreshold", \
+		0, \
+		4294967295UL, \
+		22000, \
+		CFG_VALUE_OR_DEFAULT, \
+		"Bus bandwidth super high threshold")
+
+/*
+ * <ini>
  * gBusBandwidthUltraHighThreshold - bus bandwidth ultra high threshold
  *
  * @Min: 0
  * @Max: 4294967295UL
  * @Default: 12000
  *
- * This ini specifies the bus bandwidth very high threshold
+ * This ini specifies the bus bandwidth ultra high threshold
  *
  * Usage: Internal
  *
@@ -1525,6 +1548,7 @@
 
 #ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 #define CFG_HDD_DP_BUS_BANDWIDTH \
+	CFG(CFG_DP_BUS_BANDWIDTH_SUPER_HIGH_THRESHOLD) \
 	CFG(CFG_DP_BUS_BANDWIDTH_ULTRA_HIGH_THRESHOLD) \
 	CFG(CFG_DP_BUS_BANDWIDTH_VERY_HIGH_THRESHOLD) \
 	CFG(CFG_DP_BUS_BANDWIDTH_DBS_THRESHOLD) \
@@ -1567,6 +1591,34 @@
 #define CFG_DP_HL_BUNDLE
 #endif
 
+#ifdef FEATURE_ENABLE_CE_DP_IRQ_AFFINE
+/*
+ * <ini>
+ * Enable_ce_dp_irq_affine - Enable/disable affinity on datapath CE IRQs
+ *
+ * @Min: 0
+ * @Max: 1
+ * Default: 0
+ *
+ * This ini param is used to enable/disable the affinity on datapath
+ * Copy Engine IRQs.
+ *
+ * Supported Feature: STA/SAP
+ *
+ * Usage: External
+ *
+ * </ini>
+ */
+#define CFG_ENABLE_CE_DP_IRQ_AFFINE CFG_INI_BOOL(\
+		"Enable_ce_dp_irq_affine", \
+		0, \
+		"Enable/disable irq affinity on datapath CEs")
+#define CFG_ENABLE_CE_DP_IRQ_AFFINE_ALL \
+	CFG(CFG_ENABLE_CE_DP_IRQ_AFFINE)
+#else
+#define CFG_ENABLE_CE_DP_IRQ_AFFINE_ALL
+#endif
+
 #define CFG_HDD_DP_ALL \
 	CFG(CFG_DP_NAPI_CE_CPU_MASK) \
 	CFG(CFG_DP_RX_THREAD_CPU_MASK) \
@@ -1593,5 +1645,6 @@
 	CFG_HDD_DP_LEGACY_TX_FLOW \
 	CFG_DP_ENABLE_NUD_TRACKING_ALL \
 	CFG_DP_CONFIG_DP_TRACE_ALL \
-	CFG_DP_HL_BUNDLE
+	CFG_DP_HL_BUNDLE \
+	CFG_ENABLE_CE_DP_IRQ_AFFINE_ALL
 #endif
