@@ -2166,7 +2166,7 @@ static struct file_operations pre_emp_108_dbg_en_fops = {
 static ssize_t dp_pre_emp_array_write(struct file *file,
 		const char __user *user_buff, size_t count, loff_t *ppos)
 {
-	char buf[SZ_4K];
+	char buf[SZ_8];
 	size_t len = 0;
 	char *input, *element;
 	uint8_t element_len = 0;
@@ -2218,7 +2218,7 @@ end:
 static ssize_t dp_pre_emp_array_read(struct file *file,
 		char __user *user_buff, size_t count, loff_t *ppos)
 {
-	char buf[SZ_4K];
+	char buf[SZ_8];
 	u32 len = 0;
 	int i = 0;
 
@@ -2249,7 +2249,7 @@ static struct file_operations pre_emp_array_fops = {
 static ssize_t dp_swing_array_write(struct file *file,
 		const char __user *user_buff, size_t count, loff_t *ppos)
 {
-	char buf[SZ_4K];
+	char buf[SZ_8];
 	size_t len = 0;
 	char *input, *element;
 	uint8_t element_len = 0;
@@ -2302,7 +2302,7 @@ end:
 static ssize_t dp_swing_array_read(struct file *file,
 		char __user *user_buff, size_t count, loff_t *ppos)
 {
-	char buf[SZ_4K];
+	char buf[SZ_8];
 	u32 len = 0;
 	int i = 0;
 
@@ -2334,7 +2334,7 @@ static struct file_operations swing_array_fops = {
 static ssize_t dp_pre_emp_108_array_write(struct file *file,
 		const char __user *user_buff, size_t count, loff_t *ppos)
 {
-	char buf[SZ_4K];
+	char buf[SZ_8];
 	size_t len = 0;
 	char *input, *element;
 	uint8_t element_len = 0;
@@ -2386,7 +2386,7 @@ end:
 static ssize_t dp_pre_emp_108_array_read(struct file *file,
 		char __user *user_buff, size_t count, loff_t *ppos)
 {
-	char buf[SZ_4K];
+	char buf[SZ_8];
 	u32 len = 0;
 	int i = 0;
 
