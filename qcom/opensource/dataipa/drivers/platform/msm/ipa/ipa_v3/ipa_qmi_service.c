@@ -126,7 +126,7 @@ static void ipa3_handle_indication_req(struct qmi_handle *qmi_handle,
 
 	/* check if need sending indication to modem */
 	if (ipa3_qmi_modem_init_fin)	{
-		IPAWANDBG("send indication to modem (%d)\n",
+		IPAWANDBG("send init complete indication to modem (%d)\n",
 		ipa3_qmi_modem_init_fin);
 		memset(&ind, 0, sizeof(struct
 				ipa_master_driver_init_complt_ind_msg_v01));
@@ -145,7 +145,13 @@ static void ipa3_handle_indication_req(struct qmi_handle *qmi_handle,
 			ipa3_qmi_indication_fin = false;
 		}
 	} else {
-		IPAWANERR("not send indication\n");
+		IPAWANDBG("modem init not complete, did not send indication\n");
+	}
+
+	/* check if need to send MHI RSC pipe to modem */
+	if (ipa3_ctx->is_mhi_coal_set) {
+		IPAWANDBG("Sending coalescing pipe indication to Q6\n");
+		ipa_send_mhi_coal_endp_ind_to_modem(false);
 	}
 }
 
@@ -554,8 +560,8 @@ static int ipa3_qmi_send_req_wait(struct qmi_handle *client_handle,
 
 	mutex_lock(&ipa3_qmi_lock);
 
-	if (!client_handle) {
-
+	if (!client_handle || client_handle != ipa_q6_clnt ) {
+		IPADBG("Q6 QMI client pointer already freed\n");
 		mutex_unlock(&ipa3_qmi_lock);
 		return -EINVAL;
 	}
@@ -719,6 +725,10 @@ static int ipa3_qmi_init_modem_send_sync_msg(void)
 	req.hw_filter_stats_info.hw_filter_stats_size = IPA_Q6_FNR_STATS_SIZE;
 	req.hw_filter_stats_info.hw_filter_stats_start_index = IPA_Q6_FNR_START_IDX;
 	req.hw_filter_stats_info.hw_filter_stats_end_index = IPA_Q6_FNR_END_IDX;
+
+	req.smem_info_valid = true;
+	req.smem_info.size = ipa3_ctx->ipa_smem_size;
+
 	IPAWANDBG("hw_flt stats: hw_filter_start_address = %u", req.hw_filter_stats_info.hw_filter_stats_start_addr);
 	IPAWANDBG("hw_flt stats: hw_filter_stats_size = %u", req.hw_filter_stats_info.hw_filter_stats_size);
 	IPAWANDBG("hw_flt stats: hw_filter_stats_start_index  = %u", req.hw_filter_stats_info.hw_filter_stats_start_index);
@@ -759,6 +769,8 @@ static int ipa3_qmi_init_modem_send_sync_msg(void)
 		req.v4_hash_filter_tbl_start_addr);
 	IPAWANDBG("v6_hash_filter_tbl_start_addr %d\n",
 		req.v6_hash_filter_tbl_start_addr);
+	IPAWANDBG("ipa_smem_info.size %d\n",
+			req.smem_info.size);
 
 	req_desc.max_msg_len = QMI_IPA_INIT_MODEM_DRIVER_REQ_MAX_MSG_LEN_V01;
 	req_desc.msg_id = QMI_IPA_INIT_MODEM_DRIVER_REQ_V01;
@@ -1781,7 +1793,8 @@ static void ipa3_q6_clnt_svc_arrive(struct work_struct *work)
 	/* Initialize modem IPA-driver */
 	IPAWANDBG("send ipa3_qmi_init_modem_send_sync_msg to modem\n");
 	rc = ipa3_qmi_init_modem_send_sync_msg();
-	if ((rc == -ENETRESET) || (rc == -ENODEV) || (rc == -ECONNRESET)) {
+	if ((rc == -ENETRESET) || (rc == -ENODEV) || (rc == -ECONNRESET) ||
+		atomic_read(&ipa3_ctx->is_ssr)) {
 		IPAWANERR(
 		"ipa3_qmi_init_modem_send_sync_msg failed due to SSR!\n");
 		/* Cleanup when ipa3_wwan_remove is called */
@@ -2145,6 +2158,7 @@ void ipa3_qmi_service_exit(void)
 
 	workqueues_stopped = true;
 
+	IPADBG("Entry\n");
 	/* qmi-service */
 	if (ipa3_svc_handle != NULL) {
 		qmi_handle_release(ipa3_svc_handle);
@@ -2177,6 +2191,7 @@ void ipa3_qmi_service_exit(void)
 	ipa3_qmi_indication_fin = false;
 	ipa3_modem_init_cmplt = false;
 	send_qmi_init_q6 = true;
+	IPADBG("Exit\n");
 }
 
 void ipa3_qmi_stop_workqueues(void)

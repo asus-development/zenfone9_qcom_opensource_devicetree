@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
  *
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/init.h>
@@ -52,6 +52,7 @@ static struct class *class;
 static dev_t device;
 
 struct ipa_lnx_stats_spearhead_ctx ipa_lnx_agent_ctx;
+static DEFINE_MUTEX(ipa_lnx_ctx_mutex);
 
 struct wlan_intf_mode_cnt {
 	u8 ap_cnt;
@@ -177,11 +178,16 @@ static int ipa_get_generic_stats(unsigned long arg)
 	int i, j;
 	struct ipa_lnx_generic_stats *generic_stats;
 	struct ipa_drop_stats_all *out;
-	int alloc_size;
+	uint64_t alloc_size;
 	int reg_idx;
 	struct ipa_uc_holb_client_info *holb_client;
 	struct holb_discard_stats *holb_disc_stats_ptr;
 	struct holb_monitor_stats *holb_mon_stats_ptr;
+
+	if(!(ipa_lnx_agent_ctx.log_type_mask & SPRHD_IPA_LOG_TYPE_GENERIC_STATS)) {
+		IPA_STATS_ERR("Log type GENERIC mask not set\n");
+		return -EFAULT;
+	}
 
 	alloc_size = sizeof(struct ipa_lnx_generic_stats) +
 		(sizeof(struct holb_discard_stats) *
@@ -274,47 +280,51 @@ static int ipa_get_generic_stats(unsigned long arg)
 		return res;
 	}
 
-	/* HOLB Discard stats */
-	holb_disc_stats_ptr = &generic_stats->holb_stats.holb_disc_stats[0];
-	for (i = 0; i < IPA_CLIENT_MAX; i++) {
-		int ep_idx = ipa3_get_ep_mapping(i);
+	if(ipa_lnx_agent_ctx.alloc_info.num_holb_drop_stats_clients != 0 ) {
+		/* HOLB Discard stats */
+		holb_disc_stats_ptr = &generic_stats->holb_stats.holb_disc_stats[0];
+		for (i = 0; i < IPA_CLIENT_MAX; i++) {
+			int ep_idx = ipa_get_ep_mapping(i);
 
-		if ((ep_idx == -1) || (!IPA_CLIENT_IS_CONS(i)) ||
-			(IPA_CLIENT_IS_TEST(i)))
-			continue;
+			if ((ep_idx == -1) || (!IPA_CLIENT_IS_CONS(i)) ||
+				(IPA_CLIENT_IS_TEST(i)))
+				continue;
 
-		reg_idx = ipahal_get_ep_reg_idx(ep_idx);
-		if (!(ipa3_ctx->hw_stats &&
-			(ipa3_ctx->hw_stats->drop.init.enabled_bitmask[reg_idx] &
-			ipahal_get_ep_bit(ep_idx))))
-			continue;
+			reg_idx = ipahal_get_ep_reg_idx(ep_idx);
+			if (!(ipa3_ctx->hw_stats &&
+				(ipa3_ctx->hw_stats->drop.init.enabled_bitmask[reg_idx] &
+				ipahal_get_ep_bit(ep_idx))))
+				continue;
 
-		holb_disc_stats_ptr->client_type = i;
-		holb_disc_stats_ptr->num_drp_cnt = out->client[i].drop_packet_cnt;
-		holb_disc_stats_ptr->num_drp_bytes = out->client[i].drop_byte_cnt;
-		holb_disc_stats_ptr = (struct holb_discard_stats *)((
-			uint64_t)holb_disc_stats_ptr + sizeof(struct holb_discard_stats));
+			holb_disc_stats_ptr->client_type = i;
+			holb_disc_stats_ptr->num_drp_cnt = out->client[i].drop_packet_cnt;
+			holb_disc_stats_ptr->num_drp_bytes = out->client[i].drop_byte_cnt;
+			holb_disc_stats_ptr = (struct holb_discard_stats *)((
+				uint64_t)holb_disc_stats_ptr + sizeof(struct holb_discard_stats));
+		}
 	}
 
-	/* HOLB Monitor stats */
-	holb_mon_stats_ptr = (struct holb_monitor_stats *)(
-		&generic_stats->holb_stats.holb_disc_stats[0] +
-		(ipa_lnx_agent_ctx.alloc_info.num_holb_drop_stats_clients *
-		sizeof(struct holb_discard_stats)));
-	for (i = 0; i < generic_stats->holb_stats.num_holb_mon_clients; i++) {
-		holb_client = &(ipa3_ctx->uc_ctx.holb_monitor.client[i]);
-		/* Get the client type from gsi_hdl */
-		for (j = 0; j < IPA5_MAX_NUM_PIPES; j++) {
-			if (ipa3_ctx->ep[j].gsi_chan_hdl == holb_client->gsi_chan_hdl) {
-				holb_mon_stats_ptr->client_type = ipa3_ctx->ep[j].client;
-				break;
+	if(ipa_lnx_agent_ctx.alloc_info.num_holb_mon_stats_clients != 0 ) {
+		/* HOLB Monitor stats */
+		holb_mon_stats_ptr = (struct holb_monitor_stats *)(
+			(uint64_t)&generic_stats->holb_stats.holb_disc_stats[0] +
+			(ipa_lnx_agent_ctx.alloc_info.num_holb_drop_stats_clients *
+			sizeof(struct holb_discard_stats)));
+		for (i = 0; i < generic_stats->holb_stats.num_holb_mon_clients; i++) {
+			holb_client = &(ipa3_ctx->uc_ctx.holb_monitor.client[i]);
+			/* Get the client type from gsi_hdl */
+			for (j = 0; j < IPA5_MAX_NUM_PIPES; j++) {
+				if (ipa3_ctx->ep[j].gsi_chan_hdl == holb_client->gsi_chan_hdl) {
+					holb_mon_stats_ptr->client_type = ipa3_ctx->ep[j].client;
+					break;
+				}
 			}
+			holb_mon_stats_ptr->curr_index = holb_client->current_idx;
+			holb_mon_stats_ptr->num_en_cnt = holb_client->enable_cnt;
+			holb_mon_stats_ptr->num_dis_cnt = holb_client->disable_cnt;
+			holb_mon_stats_ptr = (struct holb_monitor_stats *)((
+				uint64_t)holb_mon_stats_ptr + sizeof(struct holb_monitor_stats));
 		}
-		holb_mon_stats_ptr->curr_index = holb_client->current_idx;
-		holb_mon_stats_ptr->num_en_cnt = holb_client->enable_cnt;
-		holb_mon_stats_ptr->num_dis_cnt = holb_client->disable_cnt;
-		holb_mon_stats_ptr = (struct holb_monitor_stats *)((
-			uint64_t)holb_mon_stats_ptr + sizeof(struct holb_monitor_stats));
 	}
 
 	if(copy_to_user((void __user *)arg,
@@ -337,6 +347,11 @@ static int ipa_get_clock_stats(unsigned long arg)
 	int i;
 	int alloc_size;
 	struct pm_client_stats *pm_stats_ptr;
+
+	if(!(ipa_lnx_agent_ctx.log_type_mask & SPRHD_IPA_LOG_TYPE_CLOCK_STATS)) {
+		IPA_STATS_ERR("Log type CLOCK mask not set\n");
+		return -EFAULT;
+	}
 
 	alloc_size = sizeof(struct ipa_lnx_clock_stats) +
 		(sizeof(struct pm_client_stats) *
@@ -650,6 +665,11 @@ static int ipa_get_wlan_inst_stats(unsigned long arg)
 	struct wlan_instance_info *instance_ptr = NULL;
 	struct ipa_uc_dbg_ring_stats stats;
 
+	if(!(ipa_lnx_agent_ctx.log_type_mask & SPRHD_IPA_LOG_TYPE_WLAN_STATS)) {
+		IPA_STATS_ERR("Log type WLAN mask not set\n");
+		return -EFAULT;
+	}
+
 	alloc_size = sizeof(struct ipa_lnx_wlan_inst_stats) +
 			(ipa_lnx_agent_ctx.alloc_info.num_wlan_instances *
 			sizeof(struct wlan_instance_info));
@@ -829,6 +849,11 @@ static int ipa_get_eth_inst_stats(unsigned long arg)
 	struct ipa_lnx_gsi_rx_debug_stats *rx_instance_ptr_local = NULL;
 	struct eth_instance_info *instance_ptr = NULL;
 	struct ipa_uc_dbg_ring_stats stats;
+
+	if(!(ipa_lnx_agent_ctx.log_type_mask & SPRHD_IPA_LOG_TYPE_ETH_STATS)) {
+		IPA_STATS_ERR("Log type ETH mask not set\n");
+		return -EFAULT;
+	}
 
 	alloc_size = sizeof(struct ipa_lnx_eth_inst_stats) +
 			(ipa_lnx_agent_ctx.alloc_info.num_eth_instances *
@@ -1137,6 +1162,11 @@ static int ipa_get_usb_inst_stats(unsigned long arg)
 	struct usb_instance_info *instance_ptr = NULL;
 	struct ipa_uc_dbg_ring_stats stats;
 
+	if(!(ipa_lnx_agent_ctx.log_type_mask & SPRHD_IPA_LOG_TYPE_USB_STATS)) {
+		IPA_STATS_ERR("Log type USB mask not set\n");
+		return -EFAULT;
+	}
+
 	alloc_size = sizeof(struct ipa_lnx_usb_inst_stats) +
 			(ipa_lnx_agent_ctx.alloc_info.num_usb_instances *
 				sizeof(struct usb_instance_info));
@@ -1311,6 +1341,11 @@ static int ipa_get_mhip_inst_stats(unsigned long arg)
 	struct mhip_instance_info *instance_ptr = NULL;
 	struct ipa_uc_dbg_ring_stats stats;
 
+	if(!(ipa_lnx_agent_ctx.log_type_mask & SPRHD_IPA_LOG_TYPE_MHIP_STATS)) {
+		IPA_STATS_ERR("Log type MHIP mask not set\n");
+		return -EFAULT;
+	}
+
 	alloc_size = sizeof(struct ipa_lnx_mhip_inst_stats) +
 			(ipa_lnx_agent_ctx.alloc_info.num_mhip_instances *
 				sizeof(struct mhip_instance_info));
@@ -1470,6 +1505,42 @@ success:
 	return 0;
 }
 
+static int ipa_get_page_recycle_stats(unsigned long arg)
+{
+	struct ipa_lnx_pipe_page_recycling_stats *page_recycle_stats;
+	int alloc_size;
+
+	alloc_size = sizeof(struct ipa_lnx_pipe_page_recycling_stats);
+
+	page_recycle_stats = (struct ipa_lnx_pipe_page_recycling_stats *) memdup_user((
+		const void __user *)arg, alloc_size);
+	if (IS_ERR(page_recycle_stats)) {
+		IPA_STATS_ERR("copy from user failed");
+		return -ENOMEM;
+	}
+
+	mutex_lock(&ipa3_ctx->recycle_stats_collection_lock);
+	memcpy(page_recycle_stats, &ipa3_ctx->recycle_stats,
+		sizeof(struct ipa_lnx_pipe_page_recycling_stats));
+
+	/* Clear all the data and valid bits */
+	memset(&ipa3_ctx->recycle_stats, 0,
+		sizeof(struct ipa_lnx_pipe_page_recycling_stats));
+
+	mutex_unlock(&ipa3_ctx->recycle_stats_collection_lock);
+
+	if(copy_to_user((void __user *)arg,
+		(u8 *)page_recycle_stats,
+		alloc_size)) {
+		IPA_STATS_ERR("copy to user failed");
+		kfree(page_recycle_stats);
+		return -EFAULT;
+	}
+
+	kfree(page_recycle_stats);
+	return 0;
+}
+
 static int ipa_stats_get_alloc_info(unsigned long arg)
 {
 	int i = 0;
@@ -1483,6 +1554,7 @@ static int ipa_stats_get_alloc_info(unsigned long arg)
 
 	if (copy_from_user(&ipa_lnx_agent_ctx, u64_to_user_ptr((u64) arg),
 		sizeof(struct ipa_lnx_stats_spearhead_ctx))) {
+		memset(&ipa_lnx_agent_ctx, 0, sizeof(ipa_lnx_agent_ctx));
 		IPA_STATS_ERR("copy from user failed");
 		return -EFAULT;
 	}
@@ -1663,40 +1735,44 @@ static int ipa_stats_get_alloc_info(unsigned long arg)
 #if IS_ENABLED(CONFIG_IPA3_MHI_PRIME_MANAGER)
 		if (!ipa3_ctx->mhip_ctx.dbg_stats.uc_dbg_stats_mmio) {
 			ipa_lnx_agent_ctx.alloc_info.num_mhip_instances = 0;
-			goto success;
+		} else {
+			if (ipa_usb_is_teth_prot_connected(IPA_USB_RNDIS))
+				ipa_lnx_agent_ctx.usb_teth_prot[0] = IPA_USB_RNDIS;
+			else if(ipa_usb_is_teth_prot_connected(IPA_USB_RMNET))
+				ipa_lnx_agent_ctx.usb_teth_prot[0] = IPA_USB_RMNET;
+			else ipa_lnx_agent_ctx.usb_teth_prot[0] = IPA_USB_MAX_TETH_PROT_SIZE;
+			ipa_lnx_agent_ctx.alloc_info.num_mhip_instances = 1;
+			ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].num_pipes = 4;
+			ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].num_tx_instances = 2;
+			ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].num_rx_instances = 2;
+			ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].pipes_client_type[0] =
+				IPA_CLIENT_MHI_PRIME_TETH_CONS;
+			ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].pipes_client_type[1] =
+				IPA_CLIENT_MHI_PRIME_TETH_PROD;
+			ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].pipes_client_type[2] =
+				IPA_CLIENT_MHI_PRIME_RMNET_CONS;
+			ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].pipes_client_type[3] =
+				IPA_CLIENT_MHI_PRIME_RMNET_PROD;
+			ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].tx_inst_client_type[0]
+				= IPA_CLIENT_MHI_PRIME_TETH_CONS;
+			ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].tx_inst_client_type[1]
+				= IPA_CLIENT_MHI_PRIME_RMNET_CONS;
+			ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].rx_inst_client_type[0]
+				= IPA_CLIENT_MHI_PRIME_TETH_PROD;
+			ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].rx_inst_client_type[1]
+				= IPA_CLIENT_MHI_PRIME_RMNET_PROD;
 		}
-		if (ipa_usb_is_teth_prot_connected(IPA_USB_RNDIS))
-			ipa_lnx_agent_ctx.usb_teth_prot[0] = IPA_USB_RNDIS;
-		else if(ipa_usb_is_teth_prot_connected(IPA_USB_RMNET))
-			ipa_lnx_agent_ctx.usb_teth_prot[0] = IPA_USB_RMNET;
-		else ipa_lnx_agent_ctx.usb_teth_prot[0] = IPA_USB_MAX_TETH_PROT_SIZE;
-		ipa_lnx_agent_ctx.alloc_info.num_mhip_instances = 1;
-		ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].num_pipes = 4;
-		ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].num_tx_instances = 2;
-		ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].num_rx_instances = 2;
-		ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].pipes_client_type[0] =
-			IPA_CLIENT_MHI_PRIME_TETH_CONS;
-		ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].pipes_client_type[1] =
-			IPA_CLIENT_MHI_PRIME_TETH_PROD;
-		ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].pipes_client_type[2] =
-			IPA_CLIENT_MHI_PRIME_RMNET_CONS;
-		ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].pipes_client_type[3] =
-			IPA_CLIENT_MHI_PRIME_RMNET_PROD;
-		ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].tx_inst_client_type[0]
-			= IPA_CLIENT_MHI_PRIME_TETH_CONS;
-		ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].tx_inst_client_type[1]
-			= IPA_CLIENT_MHI_PRIME_RMNET_CONS;
-		ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].rx_inst_client_type[0]
-			= IPA_CLIENT_MHI_PRIME_TETH_PROD;
-		ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[0].rx_inst_client_type[1]
-			= IPA_CLIENT_MHI_PRIME_RMNET_PROD;
 #else
 		/* MHI Prime is not enabled */
 		ipa_lnx_agent_ctx.alloc_info.num_mhip_instances = 0;
 #endif
 	}
 
-success:
+	/* For Page recycling stats for default, coal and Low lat pipes */
+	if (ipa_lnx_agent_ctx.log_type_mask & SPRHD_IPA_LOG_TYPE_RECYCLE_STATS)
+		ipa_lnx_agent_ctx.alloc_info.num_page_rec_interval =
+			IPA_LNX_PIPE_PAGE_RECYCLING_INTERVAL_COUNT;
+
 	if(copy_to_user((u8 *)arg,
 		&ipa_lnx_agent_ctx,
 		sizeof(struct ipa_lnx_stats_spearhead_ctx))) {
@@ -1723,6 +1799,7 @@ static long ipa_lnx_stats_ioctl(struct file *filp,
 		return -EPERM;
 	}
 
+	mutex_lock(&ipa_lnx_ctx_mutex);
 	switch (cmd) {
 	case IPA_LNX_IOC_GET_ALLOC_INFO:
 		retval = ipa_stats_get_alloc_info(arg);
@@ -1768,6 +1845,7 @@ static long ipa_lnx_stats_ioctl(struct file *filp,
 				const void __user *)arg, sizeof(struct ipa_lnx_consolidated_stats));
 		if (IS_ERR(consolidated_stats)) {
 			IPA_STATS_ERR("copy from user failed");
+			mutex_unlock(&ipa_lnx_ctx_mutex);
 			return -ENOMEM;
 		}
 
@@ -1815,10 +1893,18 @@ static long ipa_lnx_stats_ioctl(struct file *filp,
 			}
 #endif
 		}
+		if (consolidated_stats->log_type_mask & SPRHD_IPA_LOG_TYPE_RECYCLE_STATS) {
+			retval = ipa_get_page_recycle_stats((unsigned long) consolidated_stats->recycle_stats);
+			if (retval) {
+				IPA_STATS_ERR("ipa get page recycle stats fail\n");
+				break;
+			}
+		}
 		break;
 	default:
 		retval = -ENOTTY;
 	}
+	mutex_unlock(&ipa_lnx_ctx_mutex);
 	return retval;
 }
 
@@ -1893,6 +1979,7 @@ int ipa_spearhead_stats_init(void)
 		return -1;
 	}
 	memset(&poll_pack_and_cred_info, 0, sizeof(poll_pack_and_cred_info));
+	memset(&ipa_lnx_agent_ctx, 0, sizeof(ipa_lnx_agent_ctx));
 	IPA_STATS_ERR("IPA_LNX_STATS_IOCTL init success\n");
 
 	return 0;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 /*
@@ -147,7 +148,7 @@ struct ipa3_wwan_private {
 
 struct ipa3_netmgr_clock_vote {
 	struct mutex mutex;
-	uint32_t cnt;
+	atomic_t cnt;
 };
 
 struct rmnet_ipa_debugfs {
@@ -2212,6 +2213,7 @@ static int handle3_ingress_format_v2(struct net_device *dev,
 
 			if (rc == -EFAULT) {
 				IPAWANERR("Failed to setup wan/coal cons pipes\n");
+				mutex_unlock(&rmnet_ipa3_ctx->pipe_handle_guard);
 				return rc;
 			}
 
@@ -2984,17 +2986,17 @@ static int ipa3_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 			if (ext_ioctl_data.u.data) {
 				/* Request to enable LPM */
 				IPAWANDBG("ioctl: unvote IPA clock\n");
-				if (rmnet_ipa3_ctx->clock_vote.cnt) {
-					rmnet_ipa3_ctx->clock_vote.cnt--;
+				if (atomic_read(&rmnet_ipa3_ctx->clock_vote.cnt)) {
+					atomic_dec(&rmnet_ipa3_ctx->clock_vote.cnt);
 					IPA_ACTIVE_CLIENTS_DEC_SPECIAL("NETMGR");
 				}
 			} else {
 				/* Request to disable LPM */
 				IPAWANDBG("ioctl: vote IPA clock\n");
-				if ((rmnet_ipa3_ctx->clock_vote.cnt + 1)
+				if ((atomic_read(&rmnet_ipa3_ctx->clock_vote.cnt) + 1)
 					<= IPA_APP_VOTE_MAX) {
 					IPA_ACTIVE_CLIENTS_INC_SPECIAL("NETMGR");
-					rmnet_ipa3_ctx->clock_vote.cnt++;
+					atomic_inc(&rmnet_ipa3_ctx->clock_vote.cnt);
 				}
 			}
 			mutex_unlock(&rmnet_ipa3_ctx->clock_vote.mutex);
@@ -3936,13 +3938,21 @@ static int ipa3_lcl_mdm_ssr_notifier_cb(struct notifier_block *this,
 	case SUBSYS_BEFORE_SHUTDOWN:
 #endif
 		IPAWANINFO("IPA received MPSS BEFORE_SHUTDOWN\n");
+		/*
+		 * Clear the proxy vote if any. This happens in scenarios
+		 * where Modem restarts before QMI Handshake is complete
+		 */
+		if (!ipa3_is_modem_up())
+			ipa3_proxy_clk_unvote();
+		/* hold a proxy vote for the modem. */
+		ipa3_proxy_clk_vote(atomic_read(&rmnet_ipa3_ctx->is_ssr));
 		/* send SSR before-shutdown notification to IPACM */
 		ipa3_set_modem_up(false);
 		rmnet_ipa_send_ssr_notification(false);
 		atomic_set(&rmnet_ipa3_ctx->is_ssr, 1);
 		ipa3_q6_pre_shutdown_cleanup();
 		if (IPA_NETDEV())
-			netif_stop_queue(IPA_NETDEV());
+			netif_device_detach(IPA_NETDEV());
 		ipa3_qmi_stop_workqueues();
 		ipa3_wan_ioctl_stop_qmi_messages();
 		ipa_stop_polling_stats();
@@ -3973,6 +3983,7 @@ static int ipa3_lcl_mdm_ssr_notifier_cb(struct notifier_block *this,
 	case SUBSYS_AFTER_SHUTDOWN:
 #endif
 		IPAWANINFO("IPA Received MPSS AFTER_SHUTDOWN\n");
+		ipa3_proxy_clk_unvote();
 		/* Clean up netdev resources in AFTER_SHUTDOWN for remoteproc
 		 * enabled targets. */
 #if IS_ENABLED(CONFIG_QCOM_Q6V5_PAS)
@@ -3990,6 +4001,11 @@ static int ipa3_lcl_mdm_ssr_notifier_cb(struct notifier_block *this,
 
 		if (ipa3_ctx_get_flag(IPA_ENDP_DELAY_WA_EN))
 			ipa3_client_prod_post_shutdown_cleanup();
+		while (atomic_read(&rmnet_ipa3_ctx->clock_vote.cnt) > 0) {
+			IPAWANDBG("ioctl: unvoting pending IPA clock\n");
+			atomic_dec(&rmnet_ipa3_ctx->clock_vote.cnt);
+			IPA_ACTIVE_CLIENTS_DEC_SPECIAL("NETMGR");
+		}
 		IPAWANINFO("IPA AFTER_SHUTDOWN handling is complete\n");
 		break;
 #if IS_ENABLED(CONFIG_DEEPSLEEP)
@@ -4435,7 +4451,8 @@ static int rmnet_ipa3_set_data_quota_wifi(struct wan_ioctl_set_data_quota *data)
 		  data->interface_name, (unsigned long) data->quota_mbytes);
 
 	if (ipa3_ctx_get_type(IPA_HW_TYPE) >= IPA_HW_v4_5 &&
-		ipa3_ctx_get_type(IPA_HW_TYPE) != IPA_HW_v4_11) {
+		ipa3_ctx_get_type(IPA_HW_TYPE) != IPA_HW_v4_11 &&
+		ipa3_ctx_get_type(IPA_HW_TYPE) != IPA_HW_v5_2) {
 		IPADBG("use ipa-uc for quota\n");
 		rc = ipa3_uc_quota_monitor(data->set_quota);
 	} else {
@@ -5652,7 +5669,9 @@ void ipa3_q6_handshake_complete(bool ssr_bootup)
 
 	ipa3_set_modem_up(true);
 	if (ipa3_ctx->ipa_config_is_mhi)
-		ipa_send_mhi_endp_ind_to_modem();
+		ipa_send_mhi_ctrl_endp_ind_to_modem();
+
+	IPAWANDBG("Q6 handshake complete\n");
 }
 
 static inline bool rmnet_ipa3_check_any_client_inited
@@ -6581,7 +6600,7 @@ int ipa3_wwan_init(void)
 
 	atomic_set(&rmnet_ipa3_ctx->is_initialized, 0);
 	atomic_set(&rmnet_ipa3_ctx->is_ssr, 0);
-	rmnet_ipa3_ctx->clock_vote.cnt = 0;
+	atomic_set(&rmnet_ipa3_ctx->clock_vote.cnt, 0);
 
 	mutex_init(&rmnet_ipa3_ctx->pipe_handle_guard);
 	mutex_init(&rmnet_ipa3_ctx->add_mux_channel_lock);
