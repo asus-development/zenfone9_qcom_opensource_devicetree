@@ -45,6 +45,19 @@
 #include "msm_common.h"
 #include "msm_dailink.h"
 
+//ASUS_BSP +++   add for codec_status
+#ifdef ASUS_AI2202_PROJECT
+#include <linux/proc_fs.h>
+#include <linux/syscalls.h>
+#include <linux/fs.h>
+#include <linux/file.h>
+#define AUDIO_CODEC_PROC_FILE  "driver/audio_codec"
+static struct proc_dir_entry *audio_codec_proc_file;
+int codec_status=0;
+int codec_num=0;
+#endif
+//ASUS_BSP ---   add for codec_status
+
 #define DRV_NAME "waipio-asoc-snd"
 #define __CHIPSET__ "WAIPIO "
 #define MSM_DAILINK_NAME(name) (__CHIPSET__#name)
@@ -53,7 +66,7 @@
 #define WCD9XXX_MBHC_DEF_BUTTONS    8
 #define CODEC_EXT_CLK_RATE          9600000
 #define DEV_NAME_STR_LEN            32
-#define WCD_MBHC_HS_V_MAX           1600
+#define WCD_MBHC_HS_V_MAX           1700  /* ASUS_BSP change to 1.7V for ASUS HW design */
 
 #define WCN_CDC_SLIM_RX_CH_MAX 2
 #define WCN_CDC_SLIM_TX_CH_MAX 2
@@ -2146,6 +2159,41 @@ void msm_common_set_pdata(struct snd_soc_card *card,
 	pdata->common_pdata = common_pdata;
 }
 
+//ASUS_BSP +++   add for codec_status
+#ifdef ASUS_AI2202_PROJECT
+static ssize_t audio_codec_proc_read(struct file *filp, char __user *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+	pr_err("[Audio] audio_codec_proc_read, codec_status is %d\n", codec_status);
+	if(*off)
+		return 0;
+	memset(messages, 0, sizeof(messages));
+	if (len > 256)
+		len = 256;
+
+	sprintf(messages, "%d\n", codec_status);
+	if (copy_to_user(buff, messages, sizeof(messages)))
+		return -EFAULT;
+	(*off)++;
+	return len;
+}
+
+static struct proc_ops proc_fops=
+{
+	.proc_read=audio_codec_proc_read,
+};
+
+static void create_audio_codec_proc_file(void)
+{
+    pr_err("[Audio] create_audio_codec_proc_file\n");
+    audio_codec_proc_file = proc_create(AUDIO_CODEC_PROC_FILE, 0444, NULL, &proc_fops);
+    if (!audio_codec_proc_file){
+        pr_err("[Audio] create_audio_codec_proc_file failed!\n");
+    }
+}
+#endif
+//ASUS_BSP ---   add for codec_status
+
 static int msm_asoc_parse_soundcard_name(struct platform_device *pdev,
 					 struct snd_soc_card *card)
 {
@@ -2253,6 +2301,15 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 		goto err;
 	}
 
+//ASUS_BSP +++   add for codec_status
+#ifdef ASUS_AI2202_PROJECT
+	if(!codec_num){
+		codec_num++;
+		create_audio_codec_proc_file();
+	}
+#endif
+//ASUS_BSP ---   add for codec_status
+
 	ret = snd_soc_of_parse_audio_routing(card, "qcom,audio-routing");
 	if (ret) {
 		dev_err(&pdev->dev, "%s: parse audio routing failed, err:%d\n",
@@ -2334,6 +2391,14 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 
 	is_initial_boot = true;
 
+//ASUS_BSP +++   add for codec_status
+#ifdef ASUS_AI2202_PROJECT
+	if(!codec_status){
+		codec_status =1;
+	}
+#endif
+//ASUS_BSP ---   add for codec_status
+
 	/* change card status to ONLINE */
 	dev_dbg(&pdev->dev, "%s: setting snd_card to ONLINE\n", __func__);
 	snd_card_set_card_status(SND_CARD_STATUS_ONLINE);
@@ -2341,6 +2406,13 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 	return 0;
 err:
 	devm_kfree(&pdev->dev, pdata);
+
+//ASUS_BSP +++  add for codec_status
+#ifdef ASUS_AI2202_PROJECT
+	codec_status = 0;
+#endif
+//ASUS_BSP ---   add for codec_status
+
 	return ret;
 }
 

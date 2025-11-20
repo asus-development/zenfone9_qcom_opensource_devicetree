@@ -11,6 +11,10 @@
 #include <linux/delay.h>
 #include <linux/kernel.h>
 #include <linux/component.h>
+//ASUS_BSP disable Audio_Debug gpio for headset porting +++
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
+//ASUS_BSP disable Audio_Debug gpio for headset porting ---
 #include <sound/soc.h>
 #include <sound/tlv.h>
 #include <soc/soundwire.h>
@@ -22,6 +26,12 @@
 #include <asoc/msm-cdc-supply.h>
 #include <bindings/audio-codec-port-types.h>
 #include <linux/qti-regmap-debugfs.h>
+
+//ASUS_BSP modify for headset status +++
+#ifdef ASUS_AI2202_PROJECT
+#include <linux/proc_fs.h>
+#endif
+//ASUS_BSP modify for headset status ---
 
 #include "wcd938x-registers.h"
 #include "wcd938x.h"
@@ -60,6 +70,12 @@
 #define WCD938X_FORMATS (SNDRV_PCM_FMTBIT_S16_LE |\
 		SNDRV_PCM_FMTBIT_S24_LE |\
 		SNDRV_PCM_FMTBIT_S24_3LE | SNDRV_PCM_FMTBIT_S32_LE)
+
+//ASUS_BSP modify for headset status +++
+#ifdef ASUS_AI2202_PROJECT
+struct wcd938x_priv *g_wcd938x;
+#endif
+//ASUS_BSP modify for headset status ---
 
 enum {
 	CODEC_TX = 0,
@@ -3990,6 +4006,59 @@ done:
 	return rc;
 }
 
+//ASUS_BSP modify for headset status +++
+#ifdef ASUS_AI2202_PROJECT
+#define HEADSET_STATUS_PROC_FILE "driver/headset_status"
+
+static struct proc_dir_entry *headset_status_proc_file;
+
+static ssize_t headset_status_proc_read(struct file *filp, char __user *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+	struct wcd938x_priv *wcd938x = g_wcd938x;
+
+	if (*off)
+		return 0;
+
+	memset(messages, 0, sizeof(messages));
+	if (len > 256)
+		len = 256;
+
+	switch (wcd938x->mbhc->wcd_mbhc.current_plug) {
+		case MBHC_PLUG_TYPE_HEADSET:
+			sprintf(messages, "1\n");
+			break;
+		case MBHC_PLUG_TYPE_HEADPHONE:
+			sprintf(messages, "2\n");
+			break;
+		default:
+			sprintf(messages, "0\n");
+			break;
+	}
+
+	if (copy_to_user(buff, messages, len))
+		return -EFAULT;
+
+	(*off)++;
+		return len;
+}
+
+static struct proc_ops headset_status_proc_ops = {
+	.proc_read = headset_status_proc_read,
+};
+
+static void create_headset_status_proc_file(void)
+{
+	printk("create_headset_status_proc_file\n");
+	headset_status_proc_file = proc_create(HEADSET_STATUS_PROC_FILE, 0666, NULL, &headset_status_proc_ops);
+
+	if (headset_status_proc_file == NULL)
+		printk("create_headset_status_proc_file failed\n");
+
+}
+#endif
+//ASUS_BSP modify for headset status ---
+
 static int wcd938x_soc_codec_probe(struct snd_soc_component *component)
 {
 	struct wcd938x_priv *wcd938x = snd_soc_component_get_drvdata(component);
@@ -4036,6 +4105,12 @@ static int wcd938x_soc_codec_probe(struct snd_soc_component *component)
 		pr_err("%s: mbhc initialization failed\n", __func__);
 		goto err_hwdep;
 	}
+
+//ASUS_BSP modify for headset status +++
+#ifdef ASUS_AI2202_PROJECT
+	g_wcd938x = wcd938x;
+#endif
+//ASUS_BSP modify for headset status ---
 
 	snd_soc_dapm_ignore_suspend(dapm, "WCD938X_AIF Playback");
 	snd_soc_dapm_ignore_suspend(dapm, "WCD938X_AIF Capture");
@@ -4089,6 +4164,13 @@ static int wcd938x_soc_codec_probe(struct snd_soc_component *component)
 		}
 	}
 	wcd938x->version = WCD938X_VERSION_1_0;
+
+//ASUS_BSP modify for headset status +++
+#ifdef ASUS_AI2202_PROJECT
+	create_headset_status_proc_file();
+#endif
+//ASUS_BSP modify for headset status ---
+
        /* Register event notifier */
 	wcd938x->nblock.notifier_call = wcd938x_event_notify;
 	if (wcd938x->register_notifier) {
@@ -4314,6 +4396,22 @@ struct wcd938x_pdata *wcd938x_populate_dt_data(struct device *dev)
 				GFP_KERNEL);
 	if (!pdata)
 		return NULL;
+
+//ASUS_BSP disable Audio_Debug gpio for headset porting +++
+    if ((of_property_match_string(dev->of_node, "qcom,project-id", "AI2202") >= 0) &&
+        (of_property_match_string(dev->of_node, "qcom,stage-id", "EVB") >= 0)) {
+        int audio_debug;
+        audio_debug = of_get_named_gpio(dev->of_node, "qcom,audio-debug", 0);
+        if (!gpio_is_valid(audio_debug)) {
+            dev_err(dev, "%s: can't get gpio qcom,audio-debug\n", __func__);
+        } else {
+            dev_err(dev, "%s: audio_debug gpio:%d\n", __func__, audio_debug);
+            devm_gpio_request_one(dev, audio_debug,
+                GPIOF_DIR_OUT, "audio_debug");
+            gpio_set_value_cansleep(audio_debug, 1);	/* disable uart log, enable audio */
+        }
+    }
+//ASUS_BSP disable Audio_Debug gpio for headset porting ---
 
 	pdata->rst_np = of_parse_phandle(dev->of_node,
 			"qcom,wcd-rst-gpio-node", 0);
