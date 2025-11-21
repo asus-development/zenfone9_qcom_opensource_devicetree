@@ -44,6 +44,9 @@
 #include "msm_drv.h"
 #include "sde_vm.h"
 
+/* ASUS BSP Display +++ */
+#include "../dsi/dsi_ai2202.h"
+
 #define SDE_PSTATES_MAX (SDE_STAGE_MAX * 4)
 #define SDE_MULTIRECT_PLANE_MAX (SDE_STAGE_MAX * 2)
 
@@ -4194,6 +4197,8 @@ void sde_crtc_commit_kickoff(struct drm_crtc *crtc,
 			continue;
 
 		sde_encoder_kickoff(encoder, true);
+
+		ai2202_set_dc_bl_process(encoder, crtc);
 	}
 	sde_crtc->kickoff_in_progress = false;
 
@@ -4205,6 +4210,9 @@ void sde_crtc_commit_kickoff(struct drm_crtc *crtc,
 		sde_crtc->event = crtc->state->event;
 		spin_unlock_irqrestore(&dev->event_lock, flags);
 	}
+
+	/* ASUS BSP Display +++ */
+	dsi_ai2202_frame_commit_cnt(crtc);
 
 	SDE_ATRACE_END("crtc_commit");
 }
@@ -4703,6 +4711,9 @@ static void sde_crtc_disable(struct drm_crtc *crtc)
 
 	power_on = 0;
 	sde_crtc_event_notify(crtc, DRM_EVENT_CRTC_POWER, &power_on, sizeof(u32));
+
+	/* ASUS BSP Display +++ */
+	dsi_ai2202_clear_commit_cnt();
 
 	mutex_unlock(&sde_crtc->crtc_lock);
 }

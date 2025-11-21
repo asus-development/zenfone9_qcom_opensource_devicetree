@@ -22,6 +22,9 @@
 #include "sde_dbg.h"
 #include "dsi_parser.h"
 
+/* ASUS BSP Display +++ */
+#include "dsi_ai2202.h"
+
 #define to_dsi_display(x) container_of(x, struct dsi_display, host)
 #define INT_BASE_10 10
 
@@ -3475,8 +3478,13 @@ int dsi_host_transfer_sub(struct mipi_dsi_host *host, struct dsi_cmd_desc *cmd)
 			goto error;
 		}
 
+		/* ASUS BSP Display +++ */
+		cmd->ctrl_flags |= dsi_ai2202_support_cmd_read_flags(cmd->msg.flags);
+
 		rc = dsi_ctrl_cmd_transfer(display->ctrl[idx].ctrl, cmd);
-		if (rc < 0)
+
+		/* ASUS BSP Display, rc=1 if CMD_READ succeed +++ */
+		if (rc < 0 && !(cmd->ctrl_flags & DSI_CTRL_CMD_READ))
 			DSI_ERR("[%s] cmd transfer failed, rc=%d\n", display->name, rc);
 
 		dsi_ctrl_transfer_unprepare(display->ctrl[idx].ctrl, cmd->ctrl_flags);
@@ -5853,6 +5861,8 @@ static int dsi_display_bind(struct device *dev,
 
 	msm_register_vm_event(master, dev, &vm_event_ops, (void *)display);
 
+	/* ASUS BSP Display +++ */
+	dsi_ai2202_display_init(display);
 	goto error;
 
 error_host_deinit:
@@ -7796,6 +7806,10 @@ int dsi_display_set_mode(struct dsi_display *display,
 	SDE_EVT32(adj_mode.priv_info->mdp_transfer_time_us,
 			timing.h_active, timing.v_active, timing.refresh_rate,
 			adj_mode.priv_info->clk_rate_hz);
+	/* ASUS BSP Display +++ */
+	DSI_LOG("resolution=%d*%d, fps=%d\n",
+			timing.v_active, timing.h_active,
+			timing.refresh_rate);
 
 	memcpy(display->panel->cur_mode, &adj_mode, sizeof(adj_mode));
 error:
@@ -8319,6 +8333,10 @@ error_panel_post_unprep:
 error:
 	mutex_unlock(&display->display_lock);
 	SDE_EVT32(SDE_EVTLOG_FUNC_EXIT);
+
+	/* ASUS BSP Display +++ */
+	dsi_ai2202_set_panel_is_on(true);
+
 	return rc;
 }
 
@@ -8659,6 +8677,16 @@ int dsi_display_enable(struct dsi_display *display)
 	}
 
 	if (mode->dsi_mode_flags & DSI_MODE_FLAG_DMS) {
+// ASUS BSP Display +++
+#if defined ASUS_AI2202_PROJECT
+		// pending panel switch cmd when dc turn off (fps change from 60 to 120/144hz)
+		// high risk: will panel cmd miss to set?
+		if (atomic_read(&display->panel->is_dc_change) &&
+				display->panel->cur_mode->timing.refresh_rate > 60) {
+			atomic_set(&display->panel->is_fps_pending, 1);
+			goto error;
+		}
+#endif
 		rc = dsi_panel_switch(display->panel);
 		if (rc)
 			DSI_ERR("[%s] failed to switch DSI panel mode, rc=%d\n",
@@ -8802,6 +8830,9 @@ int dsi_display_disable(struct dsi_display *display)
 		DSI_ERR("Invalid params\n");
 		return -EINVAL;
 	}
+
+	/* ASUS BSP Display +++ */
+	dsi_ai2202_set_panel_is_on(false);
 
 	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);
 	mutex_lock(&display->display_lock);

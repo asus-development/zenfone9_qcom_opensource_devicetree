@@ -16,6 +16,9 @@
 #include "dp_debug.h"
 #include "sde_dbg.h"
 
+/* ASUS BSP Display +++ */
+bool g_hpd = false;
+bool reduce_fence_timeout = false;
 
 #define ALTMODE_CONFIGURE_MASK (0x3f)
 #define ALTMODE_HPD_STATE_MASK (0x40)
@@ -142,6 +145,13 @@ static int dp_altmode_notify(void *priv, void *data, size_t len)
 			altmode->dp_altmode.base.multi_func,
 			altmode->dp_altmode.base.hpd_high,
 			altmode->dp_altmode.base.hpd_irq, altmode->connected);
+
+	/* ASUS BSP Display +++ */
+	if (g_hpd && !altmode->dp_altmode.base.hpd_high) {
+		DP_LOG("DP disconnect\n");
+		reduce_fence_timeout = true;
+	}
+	g_hpd = altmode->dp_altmode.base.hpd_high;
 
 	if (!pin) {
 		/* Cable detach */

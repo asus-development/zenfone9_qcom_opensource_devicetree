@@ -22,6 +22,13 @@
 
 #define DEBUG_NAME "drm_dp"
 
+#include <linux/proc_fs.h>
+struct dp_debug_private *asus_debug_private;
+struct dp_debug *asus_debug;
+extern u8 dp_asus_pre_emp[4][4];
+extern u8 dp_asus_swing[4][4];
+extern u8 dp_asus_pre_emp_108[4][4];
+
 struct dp_debug_private {
 	struct dentry *root;
 
@@ -1948,6 +1955,467 @@ static const struct file_operations mmrm_clk_cb_fops = {
 	.write = dp_debug_mmrm_clk_cb_write,
 };
 
+static ssize_t dp_debug_read_aux_err(struct file *file,
+		char __user *user_buff, size_t count, loff_t *ppos)
+{
+	struct dp_debug_private *debug = file->private_data;
+	char buf[SZ_8];
+	u32 len = 0;
+
+	if (!debug)
+		return -ENODEV;
+
+	if (*ppos)
+		return 0;
+
+	len += snprintf(buf, SZ_8, "%d\n", debug->dp_debug.aux_err);
+
+	len = min_t(size_t, count, len);
+	if (copy_to_user(user_buff, buf, len))
+		return -EFAULT;
+
+	*ppos += len;
+	return len;
+}
+
+static const struct file_operations aux_err_fops = {
+	.open = simple_open,
+	.read = dp_debug_read_aux_err,
+};
+
+
+// for swing & pre-emphasis
+static ssize_t dp_swing_debug_enable_write(struct file *file,
+		const char __user *user_buff, size_t count, loff_t *ppos)
+{
+	struct dp_debug_private *debug = file->private_data;
+	char buf[SZ_8];
+	size_t len = 0;
+	int swing_dbg_en = 0;
+
+	if (!debug)
+		return -ENODEV;
+
+	if (*ppos)
+		return 0;
+
+	/* Leave room for termination char */
+	len = min_t(size_t, count, SZ_8 - 1);
+	if (copy_from_user(buf, user_buff, len))
+		goto end;
+
+	buf[len] = '\0';
+
+	if (kstrtoint(buf, 10, &swing_dbg_en) != 0)
+		goto end;
+
+	debug->dp_debug.swing_dbg_en = swing_dbg_en;
+	DP_LOG("swing_dbg_en = %d\n", debug->dp_debug.swing_dbg_en);
+
+end:
+	return len;
+}
+
+static ssize_t dp_swing_debug_enable_read(struct file *file,
+		char __user *user_buff, size_t count, loff_t *ppos)
+{
+	struct dp_debug_private *debug = file->private_data;
+	char buf[SZ_8];
+	u32 len = 0;
+
+	if (!debug)
+		return -ENODEV;
+
+	if (*ppos)
+		return 0;
+
+	len += snprintf(buf, SZ_8, "%d\n", debug->dp_debug.swing_dbg_en);
+
+	len = min_t(size_t, count, len);
+	if (copy_to_user(user_buff, buf, len))
+		return -EFAULT;
+
+	*ppos += len;
+	return len;
+}
+
+static struct file_operations swing_dbg_en_fops = {
+	.open = simple_open,
+	.write = dp_swing_debug_enable_write,
+	.read = dp_swing_debug_enable_read,
+};
+
+static ssize_t dp_pre_emp_debug_enable_write(struct file *file,
+		const char __user *user_buff, size_t count, loff_t *ppos)
+{
+	struct dp_debug_private *debug = file->private_data;
+	char buf[SZ_8];
+	size_t len = 0;
+	int pre_emp_dbg_en = 0;
+
+	if (!debug)
+		return -ENODEV;
+
+	if (*ppos)
+		return 0;
+
+	/* Leave room for termination char */
+	len = min_t(size_t, count, SZ_8 - 1);
+	if (copy_from_user(buf, user_buff, len))
+		goto end;
+
+	buf[len] = '\0';
+
+	if (kstrtoint(buf, 10, &pre_emp_dbg_en) != 0)
+		goto end;
+
+	debug->dp_debug.pre_emp_dbg_en = pre_emp_dbg_en;
+	DP_LOG("pre_emp_dbg_en = %d\n", debug->dp_debug.pre_emp_dbg_en);
+
+end:
+	return len;
+}
+
+static ssize_t dp_pre_emp_debug_enable_read(struct file *file,
+		char __user *user_buff, size_t count, loff_t *ppos)
+{
+	struct dp_debug_private *debug = file->private_data;
+	char buf[SZ_8];
+	u32 len = 0;
+
+	if (!debug)
+		return -ENODEV;
+
+	if (*ppos)
+		return 0;
+
+	len += snprintf(buf, SZ_8, "%d\n", debug->dp_debug.pre_emp_dbg_en);
+
+	len = min_t(size_t, count, len);
+	if (copy_to_user(user_buff, buf, len))
+		return -EFAULT;
+
+	*ppos += len;
+	return len;
+}
+
+static struct file_operations pre_emp_dbg_en_fops = {
+	.open = simple_open,
+	.write = dp_pre_emp_debug_enable_write,
+	.read = dp_pre_emp_debug_enable_read,
+};
+
+static ssize_t dp_pre_emp_108_debug_enable_write(struct file *file,
+		const char __user *user_buff, size_t count, loff_t *ppos)
+{
+	struct dp_debug_private *debug = file->private_data;
+	char buf[SZ_8];
+	size_t len = 0;
+	int pre_emp_108_dbg_en = 0;
+
+	if (!debug)
+		return -ENODEV;
+
+	if (*ppos)
+		return 0;
+
+	/* Leave room for termination char */
+	len = min_t(size_t, count, SZ_8 - 1);
+	if (copy_from_user(buf, user_buff, len))
+		goto end;
+
+	buf[len] = '\0';
+
+	if (kstrtoint(buf, 10, &pre_emp_108_dbg_en) != 0)
+		goto end;
+
+	debug->dp_debug.pre_emp_108_dbg_en = pre_emp_108_dbg_en;
+	DP_LOG("pre_emp_108_dbg_en = %d\n", debug->dp_debug.pre_emp_108_dbg_en);
+
+end:
+	return len;
+}
+
+static ssize_t dp_pre_emp_108_debug_enable_read(struct file *file,
+		char __user *user_buff, size_t count, loff_t *ppos)
+{
+	struct dp_debug_private *debug = file->private_data;
+	char buf[SZ_8];
+	u32 len = 0;
+
+	if (!debug)
+		return -ENODEV;
+
+	if (*ppos)
+		return 0;
+
+	len += snprintf(buf, SZ_8, "%d\n", debug->dp_debug.pre_emp_108_dbg_en);
+
+	len = min_t(size_t, count, len);
+	if (copy_to_user(user_buff, buf, len))
+		return -EFAULT;
+
+	*ppos += len;
+	return len;
+}
+
+static struct file_operations pre_emp_108_dbg_en_fops = {
+	.open = simple_open,
+	.write = dp_pre_emp_108_debug_enable_write,
+	.read = dp_pre_emp_108_debug_enable_read,
+};
+
+static ssize_t dp_pre_emp_array_write(struct file *file,
+		const char __user *user_buff, size_t count, loff_t *ppos)
+{
+	char buf[SZ_8];
+	size_t len = 0;
+	char *input, *element;
+	uint8_t element_len = 0;
+	int array_size = sizeof(dp_asus_pre_emp)/sizeof(dp_asus_pre_emp[0][0]);
+	int element_arr[16] = {0};
+	int cnt = 0, i = 0, j=0;
+
+	if (*ppos)
+		return 0;
+
+	len = min_t(size_t, count, SZ_4K - 1);
+	if (copy_from_user(buf, user_buff, len))
+		goto end;
+
+	input = buf;
+	*(input+len-1) = '\0';
+
+	// separate ,
+	while ((element = strsep(&input, ",")) != NULL) {
+		element_len = strlen(element);
+
+		if (element_len > 2 || element_len < 1)
+			goto end;
+
+		sscanf(element, "%x", &(element_arr[cnt]));
+		cnt++;
+	}
+
+	// must is equal to array size
+	if(cnt != array_size) {
+		DP_LOG("%d is not equal to 16.\n", cnt);
+		goto end;
+	}
+
+	cnt = 0;
+	for(i = 0; i < 4; i++) {
+		for (j = 0; j < 4; j++) {
+			DP_LOG("[%d][%d] change from 0x%x to 0x%x\n",
+				   i, j, dp_asus_pre_emp[i][j], element_arr[cnt]);
+			dp_asus_pre_emp[i][j] = element_arr[cnt] & 0xff;
+			cnt++;
+		}
+	}
+
+end:
+	return len;
+}
+
+static ssize_t dp_pre_emp_array_read(struct file *file,
+		char __user *user_buff, size_t count, loff_t *ppos)
+{
+	char buf[SZ_8];
+	u32 len = 0;
+	int i = 0;
+
+	if (*ppos)
+		return 0;
+
+	for( i = 0; i < 4; i++) {
+		len += snprintf(buf + len, SZ_4K, "0x%x 0x%x 0x%x 0x%x\n",
+			   dp_asus_pre_emp[i][0], dp_asus_pre_emp[i][1],
+			   dp_asus_pre_emp[i][2], dp_asus_pre_emp[i][3]);
+	}
+
+	len = min_t(size_t, count, len);
+	if (copy_to_user(user_buff, buf, len))
+		return -EFAULT;
+
+	*ppos += len;
+	return len;
+
+}
+
+static struct file_operations pre_emp_array_fops = {
+	.open = simple_open,
+	.write = dp_pre_emp_array_write,
+	.read = dp_pre_emp_array_read,
+};
+
+static ssize_t dp_swing_array_write(struct file *file,
+		const char __user *user_buff, size_t count, loff_t *ppos)
+{
+	char buf[SZ_8];
+	size_t len = 0;
+	char *input, *element;
+	uint8_t element_len = 0;
+	int array_size = sizeof(dp_asus_swing)/sizeof(dp_asus_swing[0][0]);
+	int element_arr[16] = {0};
+	int cnt = 0, i = 0, j=0;
+
+	if (*ppos)
+		return 0;
+
+	len = min_t(size_t, count, SZ_4K - 1);
+	if (copy_from_user(buf, user_buff, len))
+		goto end;
+
+	input = buf;
+	*(input+len-1) = '\0';
+
+	// separate ,
+	while ((element = strsep(&input, ",")) != NULL) {
+		element_len = strlen(element);
+
+		if (element_len > 2 || element_len < 1)
+			goto end;
+
+		//DP_LOG("element = %s +++\n", element);
+		sscanf(element, "%x", &(element_arr[cnt]));
+		cnt++;
+	}
+
+	// must is equal to array size
+	if(cnt != array_size) {
+		DP_LOG("%d is not equal to 16.\n", cnt);
+		goto end;
+	}
+
+	cnt = 0;
+	for(i = 0; i < 4; i++) {
+		for (j = 0; j < 4; j++) {
+			DP_LOG("[%d][%d] change from 0x%x to 0x%x\n",
+				   i, j, dp_asus_swing[i][j], element_arr[cnt]);
+			dp_asus_swing[i][j] = element_arr[cnt] & 0xff;
+			cnt++;
+		}
+	}
+
+end:
+	return len;
+}
+
+static ssize_t dp_swing_array_read(struct file *file,
+		char __user *user_buff, size_t count, loff_t *ppos)
+{
+	char buf[SZ_8];
+	u32 len = 0;
+	int i = 0;
+
+	if (*ppos)
+		return 0;
+
+	for( i = 0; i < 4; i++) {
+		len += snprintf(buf + len, SZ_4K,
+			   "0x%x 0x%x 0x%x 0x%x\n",
+			   dp_asus_swing[i][0], dp_asus_swing[i][1],
+			   dp_asus_swing[i][2], dp_asus_swing[i][3]);
+	}
+
+	len = min_t(size_t, count, len);
+	if (copy_to_user(user_buff, buf, len))
+		return -EFAULT;
+
+	*ppos += len;
+	return len;
+
+}
+
+static struct file_operations swing_array_fops = {
+	.open = simple_open,
+	.write = dp_swing_array_write,
+	.read = dp_swing_array_read,
+};
+
+static ssize_t dp_pre_emp_108_array_write(struct file *file,
+		const char __user *user_buff, size_t count, loff_t *ppos)
+{
+	char buf[SZ_8];
+	size_t len = 0;
+	char *input, *element;
+	uint8_t element_len = 0;
+	int array_size = sizeof(dp_asus_pre_emp_108)/sizeof(dp_asus_pre_emp_108[0][0]);
+	int element_arr[16] = {0};
+	int cnt = 0, i = 0, j=0;
+
+	if (*ppos)
+		return 0;
+
+	len = min_t(size_t, count, SZ_4K - 1);
+	if (copy_from_user(buf, user_buff, len))
+		goto end;
+
+	input = buf;
+	*(input+len-1) = '\0';
+
+	// separate ,
+	while ((element = strsep(&input, ",")) != NULL) {
+		element_len = strlen(element);
+
+		if (element_len > 2 || element_len < 1)
+			goto end;
+
+		sscanf(element, "%x", &(element_arr[cnt]));
+		cnt++;
+	}
+
+	// must is equal to array size
+	if(cnt != array_size) {
+		DP_LOG("%d is not equal to 16.\n", cnt);
+		goto end;
+	}
+
+	cnt = 0;
+	for(i = 0; i < 4; i++) {
+		for (j = 0; j < 4; j++) {
+			DP_LOG("[%d][%d] change from 0x%x to 0x%x\n",
+				   i, j, dp_asus_pre_emp_108[i][j], element_arr[cnt]);
+			dp_asus_pre_emp_108[i][j] = element_arr[cnt] & 0xff;
+			cnt++;
+		}
+	}
+
+end:
+	return len;
+}
+
+static ssize_t dp_pre_emp_108_array_read(struct file *file,
+		char __user *user_buff, size_t count, loff_t *ppos)
+{
+	char buf[SZ_8];
+	u32 len = 0;
+	int i = 0;
+
+	if (*ppos)
+		return 0;
+
+	for( i = 0; i < 4; i++) {
+		len += snprintf(buf + len, SZ_4K, "0x%x 0x%x 0x%x 0x%x\n",
+			   dp_asus_pre_emp_108[i][0], dp_asus_pre_emp_108[i][1],
+			   dp_asus_pre_emp_108[i][2], dp_asus_pre_emp_108[i][3]);
+	}
+
+	len = min_t(size_t, count, len);
+	if (copy_to_user(user_buff, buf, len))
+		return -EFAULT;
+
+	*ppos += len;
+	return len;
+
+}
+
+static struct file_operations pre_emp_108_array_fops = {
+	.open = simple_open,
+	.write = dp_pre_emp_108_array_write,
+	.read = dp_pre_emp_108_array_read,
+};
+
 static int dp_debug_init_mst(struct dp_debug_private *debug, struct dentry *dir)
 {
 	int rc = 0;
@@ -2169,6 +2637,62 @@ static int dp_debug_init_status(struct dp_debug_private *debug,
 		rc = PTR_ERR(file);
 		DP_ERR("[%s] debugfs hdcp failed, rc=%d\n",
 			DEBUG_NAME, rc);
+		return rc;
+	}
+
+	file = debugfs_create_file("aux_err", 0644, dir, debug, &aux_err_fops);
+	if (IS_ERR_OR_NULL(file)) {
+		rc = PTR_ERR(file);
+		DP_ERR("[%s] debugfs aux_err failed, rc=%d\n",
+		       DEBUG_NAME, rc);
+		return rc;
+	}
+
+	file = debugfs_create_file("asus_swing_dbg_en", 0644, dir, debug, &swing_dbg_en_fops);
+	if (IS_ERR_OR_NULL(file)) {
+		rc = PTR_ERR(file);
+		DP_ERR("[%s] debugfs asus_swing_dbg_en failed, rc=%d\n",
+			   DEBUG_NAME, rc);
+		return rc;
+	}
+
+	file = debugfs_create_file("asus_pre_emp_dbg_en", 0644, dir, debug, &pre_emp_dbg_en_fops);
+	if (IS_ERR_OR_NULL(file)) {
+		rc = PTR_ERR(file);
+		DP_ERR("[%s] debugfs asus_pre_emp_dbg_en failed, rc=%d\n",
+			   DEBUG_NAME, rc);
+		return rc;
+	}
+
+	file = debugfs_create_file("asus_pre_emp_108_dbg_en", 0644, dir, debug, &pre_emp_108_dbg_en_fops);
+	if (IS_ERR_OR_NULL(file)) {
+		rc = PTR_ERR(file);
+		DP_ERR("[%s] debugfs asus_pre_emp_108_dbg_en failed, rc=%d\n",
+			   DEBUG_NAME, rc);
+		return rc;
+	}
+
+	file = debugfs_create_file("asus_pre_emp_array", 0644, dir, debug, &pre_emp_array_fops);
+	if (IS_ERR_OR_NULL(file)) {
+		rc = PTR_ERR(file);
+		DP_ERR("[%s] debugfs asus_pre_emp_array failed, rc=%d\n",
+			   DEBUG_NAME, rc);
+		return rc;
+	}
+
+	file = debugfs_create_file("asus_swing_array", 0644, dir, debug, &swing_array_fops);
+	if (IS_ERR_OR_NULL(file)) {
+		rc = PTR_ERR(file);
+		DP_ERR("[%s] debugfs asus_swing_array failed, rc=%d\n",
+			   DEBUG_NAME, rc);
+		return rc;
+	}
+
+	file = debugfs_create_file("asus_pre_emp_108_array", 0644, dir, debug, &pre_emp_108_array_fops);
+	if (IS_ERR_OR_NULL(file)) {
+		rc = PTR_ERR(file);
+		DP_ERR("[%s] debugfs asus_pre_emp_108_array failed, rc=%d\n",
+			   DEBUG_NAME, rc);
 		return rc;
 	}
 
@@ -2501,6 +3025,9 @@ struct dp_debug *dp_debug_get(struct dp_debug_in *in)
 	dp_debug->set_mst_con = dp_debug_set_mst_con;
 
 	dp_debug->max_pclk_khz = debug->parser->max_pclk_khz;
+
+	asus_debug_private = debug;
+	asus_debug = dp_debug;
 
 	return dp_debug;
 error:

@@ -87,6 +87,31 @@ static u8 const dp_swing_hbr_rbr[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS] = {
 	{0x1F, 0xFF, 0xFF, 0xFF}  /* sw1, 1.2v */
 };
 
+/* ASUS BSP Display +++ */
+u8 dp_asus_pre_emp[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS] = {
+	{0x00, 0x0E, 0x15, 0x1B}, /* pe0, 0 db */
+	{0x00, 0x0E, 0x15, 0xFF}, /* pe1, 3.5 db */
+	{0x00, 0x0E, 0xFF, 0xFF}, /* pe2, 6.0 db */
+	{0x04, 0xFF, 0xFF, 0xFF}  /* pe3, 9.5 db */
+};
+
+u8 dp_asus_swing[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS] = {
+	{0x08, 0x0F, 0x16, 0x1F}, /* sw0, 0.4v */
+	{0x11, 0x1E, 0x1F, 0xFF}, /* sw1, 0.6v */
+	{0x16, 0x1F, 0xFF, 0xFF}, /* sw1, 0.8v */
+	{0x1F, 0xFF, 0xFF, 0xFF}  /* sw1, 1.2v */
+};
+
+u8 dp_asus_pre_emp_108[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS] = {
+	{0x00, 0x0E, 0x15, 0x1B}, /* pe0, 0 db */
+	{0x00, 0x0E, 0x15, 0xFF}, /* pe1, 3.5 db */
+	{0x00, 0x0E, 0xFF, 0xFF}, /* pe2, 6.0 db */
+	{0x04, 0xFF, 0xFF, 0xFF}  /* pe3, 9.5 db */
+};
+
+extern struct dp_debug *asus_debug;
+/* ASUS BSP Display --- */
+
 struct dp_catalog_private_v420 {
 	struct device *dev;
 	struct dp_catalog_sub sub;
@@ -276,6 +301,7 @@ static void dp_catalog_ctrl_update_vx_px_v420(struct dp_catalog_ctrl *ctrl,
 	struct dp_catalog_private_v420 *catalog;
 	struct dp_io_data *io_data;
 	u8 value0, value1;
+	u8 value2; // ASUS BSP Display
 	u32 version, phy_version;
 
 	if (!ctrl || !((v_level < MAX_VOLTAGE_LEVELS)
@@ -311,18 +337,41 @@ static void dp_catalog_ctrl_update_vx_px_v420(struct dp_catalog_ctrl *ctrl,
 		value1 = vm_pre_emphasis[v_level][p_level];
 	}
 
+	/* ASUS BSP Display +++ */
+	if (asus_debug->swing_dbg_en == 1) {
+		value0 = dp_asus_swing[v_level][p_level];
+	}
+
+	if (asus_debug->pre_emp_dbg_en == 1) {
+		value1 = dp_asus_pre_emp[v_level][p_level];
+	}
+
+	if (asus_debug->pre_emp_108_dbg_en == 1) {
+		value2 = dp_asus_pre_emp_108[v_level][p_level];
+	}
+	/* ASUS BSP Display --- */
+
 	/* program default setting first */
 	io_data = catalog->io->dp_ln_tx0;
 	dp_write(TXn_TX_DRV_LVL_V420, 0x2A);
 	dp_write(TXn_TX_EMP_POST1_LVL, 0x20);
 
+	if (asus_debug->pre_emp_108_dbg_en == 1)
+		dp_write(0x0108, 0x20);
+
 	io_data = catalog->io->dp_ln_tx1;
 	dp_write(TXn_TX_DRV_LVL_V420, 0x2A);
 	dp_write(TXn_TX_EMP_POST1_LVL, 0x20);
 
+	if (asus_debug->pre_emp_108_dbg_en == 1)
+		dp_write(0x0108, 0x20);
+
 	/* Enable MUX to use Cursor values from these registers */
 	value0 |= BIT(5);
 	value1 |= BIT(5);
+
+	if (asus_debug->pre_emp_108_dbg_en == 1)
+		value2 |= BIT(5);
 
 	/* Configure host and panel only if both values are allowed */
 	if (value0 != 0xFF && value1 != 0xFF) {
@@ -330,9 +379,15 @@ static void dp_catalog_ctrl_update_vx_px_v420(struct dp_catalog_ctrl *ctrl,
 		dp_write(TXn_TX_DRV_LVL_V420, value0);
 		dp_write(TXn_TX_EMP_POST1_LVL, value1);
 
+		if (asus_debug->pre_emp_108_dbg_en == 1)
+			dp_write(0x0108, value2);
+
 		io_data = catalog->io->dp_ln_tx1;
 		dp_write(TXn_TX_DRV_LVL_V420, value0);
 		dp_write(TXn_TX_EMP_POST1_LVL, value1);
+
+		if (asus_debug->pre_emp_108_dbg_en == 1)
+			dp_write(0x0108, value2);
 
 		DP_DEBUG("hw: vx_value=0x%x px_value=0x%x\n",
 			value0, value1);
