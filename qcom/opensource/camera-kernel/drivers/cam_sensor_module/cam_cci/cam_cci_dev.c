@@ -504,6 +504,9 @@ static int cam_cci_component_bind(struct device *dev,
 
 	g_cci_subdev[soc_info->index] = &new_cci_dev->v4l2_dev_str.sd;
 	mutex_init(&(new_cci_dev->init_mutex));
+#if defined ASUS_AI2202_PROJECT
+	mutex_init(&(new_cci_dev->asus_mutex));
+#endif
 	CAM_DBG(CAM_CCI, "Device Type :%d", soc_info->index);
 
 	cpas_parms.cam_cpas_client_cb = NULL;

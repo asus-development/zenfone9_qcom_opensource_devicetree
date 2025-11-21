@@ -139,6 +139,9 @@ struct cam_sensor_ctrl_t {
 		CAM_SENSOR_NAME_MAX_SIZE];
 	bool                           is_aon_user;
 	bool                           hw_no_ops;
+#if defined ASUS_AI2202_PROJECT
+	uint8_t power_state;//ASUS_BSP Zhengwei "porting sensor ATD"
+#endif
 };
 
 /**

@@ -231,6 +231,9 @@ struct cci_device {
 	bool is_burst_read[MASTER_MAX];
 	uint32_t irqs_disabled;
 	struct mutex init_mutex;
+#if defined ASUS_AI2202_PROJECT
+	struct mutex asus_mutex;
+#endif
 	uint64_t  dump_en;
 };
 

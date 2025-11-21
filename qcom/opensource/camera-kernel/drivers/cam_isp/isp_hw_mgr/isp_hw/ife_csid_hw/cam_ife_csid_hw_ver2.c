@@ -27,6 +27,11 @@
 #include "cam_common_util.h"
 #include "cam_subdev.h"
 
+#if defined ASUS_AI2202_PROJECT
+extern uint8_t g_cam_csi_check;  //ASUS_BSP Bryant "Add for camera csi debug"
+extern uint8_t g_cam_csi_check_count;  //ASUS_BSP "Add for camera csi debug count"
+#endif
+
 /* CSIPHY TPG VC/DT values */
 #define CAM_IFE_CPHY_TPG_VC_VAL                         0x0
 #define CAM_IFE_CPHY_TPG_DT_VAL                         0x2B
@@ -1090,6 +1095,10 @@ static int cam_ife_csid_ver2_rx_err_bottom_half(
 					total_crc, long_pkt_ftr_val & 0xffff,
 					long_pkt_ftr_val >> 16);
 			}
+			#if defined ASUS_AI2202_PROJECT
+				g_cam_csi_check = CSID_ERROR_CRC;
+				g_cam_csi_check_count++;
+			#endif
 		}
 
 		CAM_ERR(CAM_ISP, "Fatal Errors: %s", log_buf);
