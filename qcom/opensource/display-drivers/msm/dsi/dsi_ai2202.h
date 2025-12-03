@@ -16,22 +16,16 @@
 #define PANEL_VENDOR_ID          "driver/panel_vendor_id"
 #define MIPI_DSI_MSG_CMD_READ BIT(8)
 #define HBM_MODE                 "hbm_mode"
-#define COMMIT_FRAMES_COUNT 5
 #define DIMMING_SPEED            "lcd_dimming_speed"
 #define LCD_BACKLIGNTNESS        "lcd_brightness"
 
 u32 dsi_ai2202_support_cmd_read_flags(u32 flags);
-void dsi_ai2202_set_dimming_smooth(struct dsi_panel *panel, u32 backlight);
 void dsi_ai2202_display_init(struct dsi_display *display);
 void dsi_ai2202_parse_panel_vendor_id(struct dsi_panel *panel);
 void dsi_ai2202_set_panel_is_on(bool on);
-void dsi_ai2202_record_backlight(u32 bl_lvl);
 u32 dsi_ai2202_backlightupdate(u32 bl_lvl);
-void dsi_ai2202_frame_commit_cnt(struct drm_crtc *crtc);
-void dsi_ai2202_clear_commit_cnt(void);
 bool ai2202_need_skip_data(u32 c2_last);
 void ai2202_store_c2_last(u32 c2_last);
 void ai2202_set_dc_bl_process(struct drm_encoder *encoder, struct drm_crtc *crtc);
-void dsi_ai2202_need_aod_reset(struct dsi_panel *panel);
 
 #endif /* _DSI_ZF9_H_ */

@@ -8677,16 +8677,6 @@ int dsi_display_enable(struct dsi_display *display)
 	}
 
 	if (mode->dsi_mode_flags & DSI_MODE_FLAG_DMS) {
-// ASUS BSP Display +++
-#if defined ASUS_AI2202_PROJECT
-		// pending panel switch cmd when dc turn off (fps change from 60 to 120/144hz)
-		// high risk: will panel cmd miss to set?
-		if (atomic_read(&display->panel->is_dc_change) &&
-				display->panel->cur_mode->timing.refresh_rate > 60) {
-			atomic_set(&display->panel->is_fps_pending, 1);
-			goto error;
-		}
-#endif
 		rc = dsi_panel_switch(display->panel);
 		if (rc)
 			DSI_ERR("[%s] failed to switch DSI panel mode, rc=%d\n",

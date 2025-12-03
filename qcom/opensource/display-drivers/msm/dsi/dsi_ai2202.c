@@ -12,7 +12,6 @@
 static char dsi_display_unique_id[MAX_CMDLINE_PARAM_LEN];
 struct dsi_display *g_display;
 char g_reg_buffer[REG_BUF_SIZE];
-int display_commit_cnt = COMMIT_FRAMES_COUNT;
 static int g_hdr = 0;
 // DC mode
 bool dc_fixed_bl;
@@ -248,33 +247,6 @@ error:
 	return rc;
 }
 
-// send Dimming Smooth command to panel
-void dsi_ai2202_set_dimming_smooth(struct dsi_panel *panel, u32 backlight)
-{
-	int rc = 0;
-
-	// set to 1 if set bl from FOD or DC process in kernel
-	if (atomic_read(&panel->allow_bl_change)) {
-		panel->panel_bl_count = 1;
-		return;
-	}
-
-	if (panel->aod_state || backlight == 0) {
-		panel->panel_bl_count = 0;
-		return;
-	}
-
-	if (panel->panel_bl_count == 1) {
-		DSI_LOG("restore dimming smooth\n");
-		rc = dsi_ai2202_tx_cmd_set(panel, DSI_CMD_SET_DIMMING_SMOOTH);
-		if (rc)
-			DSI_LOG("[%s] failed to send DSI_CMD_SET_DIMMING_SMOOTH cmd, rc=%d\n",
-				   panel->name, rc);
-	}
-
-	panel->panel_bl_count++;
-}
-
 // panel_reg_rw_ops() - read/write/show panel register
 static ssize_t panel_reg_rw(struct file *filp, const char *buff, size_t len, loff_t *off)
 {
@@ -419,16 +391,6 @@ u32 dsi_ai2202_support_cmd_read_flags(u32 flags)
 	return ret_flags;
 }
 
-static void dsi_ai2202_restore_backlight(void)
-{
-	int rc = 0;
-
-	DSI_LOG("restore bl=%d\n", g_display->panel->panel_last_backlight);
-	rc = dsi_panel_set_backlight(g_display->panel, g_display->panel->panel_last_backlight);
-	if (rc)
-		DSI_LOG("unable to set backlight\n");
-}
-
 // send HBM command to panel
 static int dsi_ai2202_set_hbm(struct dsi_panel *panel, int enable)
 {
@@ -471,7 +433,6 @@ static int dsi_ai2202_set_hbm(struct dsi_panel *panel, int enable)
 				DSI_LOG("[%s] failed to send DSI_CMD_SET_HDR_HBM_OFF cmd, rc=%d\n",
 					panel->name, rc);
 			g_display->panel->panel_hbm_mode = 0;
-			dsi_ai2202_restore_backlight();
 		} else {
 			DSI_LOG("[%s] send DSI_CMD_SET_HBM_OFF cmd \n",panel->name);
 			rc = dsi_ai2202_tx_cmd_set(panel, DSI_CMD_SET_HBM_OFF);
@@ -571,9 +532,7 @@ static inline void display_panel_clear_dc(void)
 	if (!display_panel_valid())
 		return;
 
-	atomic_set(&g_display->panel->is_dc_change, 0);
 	atomic_set(&g_display->panel->is_bl_ready, 0);
-	atomic_set(&g_display->panel->allow_bl_change, 0);
 	atomic_set(&g_display->panel->is_i6_change, 0);
 }
 
@@ -610,11 +569,6 @@ static ssize_t lcd_brightness_write(struct file *filp, const char *buff, size_t 
 
 	display_panel_clear_dc();
 
-	// only this criteria need to validate igc
-	if (g_display->panel->panel_last_backlight <= 248) {
-		DSI_LOG("dc=%d\n", DC_mode);
-		atomic_set(&g_display->panel->is_dc_change, 1);
-	}
 exit:
 	mutex_unlock(&g_display->panel->panel_lock);
 	return len;
@@ -701,66 +655,6 @@ u32 dsi_ai2202_backlightupdate(u32 bl_lvl)
 		return 4;
 	} else {
 		return bl_lvl;
-	}
-}
-
-void dsi_ai2202_need_aod_reset(struct dsi_panel *panel)
-{
-	int rc = 0;
-
-	mutex_lock(&panel->panel_lock);
-	if (!panel->panel_initialized)
-		goto exit;
-
-	if(panel->panel_last_backlight == 1 || panel->aod_mode == 1) {
-		DSI_LOG("notify set AOD LOW command\n");
-		rc = dsi_ai2202_tx_cmd_set(panel, DSI_CMD_SET_AOD_LOW);
-	} else if(panel->panel_last_backlight == 61 || panel->aod_mode == 2) {
-		DSI_LOG("notify set AOD HIGH command\n");
-		rc = dsi_ai2202_tx_cmd_set(panel, DSI_CMD_SET_AOD_HIGH);
-	}
-
-	if(rc) {
-		DSI_LOG("failed to set notify AOD command");
-	}
-
-	panel->panel_aod_last_bl = panel->panel_last_backlight;
-	panel->aod_delay = false;
-exit:
-	mutex_unlock(&panel->panel_lock);
-	return;
-}
-
-static void dsi_ai2202_aod_backlight(struct dsi_panel *panel)
-{
-	int rc = 0;
-	if (!panel) {
-		DSI_LOG("invalid params\n");
-		return;
-	}
-
-	if (panel->aod_state ) {
-		if (panel->panel_last_backlight == 61 || panel->panel_last_backlight == 1) {
-			if (panel->panel_last_backlight == 61 && panel->panel_last_backlight != panel->panel_aod_last_bl) {
-				DSI_LOG("set AOD HIGH command\n");
-				panel->panel_aod_last_bl = panel->panel_last_backlight;
-				panel->aod_mode = 2;
-				rc = dsi_ai2202_tx_cmd_set(panel, DSI_CMD_SET_AOD_HIGH);
-			} else if (panel->panel_last_backlight == 1 && panel->panel_last_backlight != panel->panel_aod_last_bl) {
-				DSI_LOG("set AOD LOW command\n");
-				panel->panel_aod_last_bl = panel->panel_last_backlight;
-				panel->aod_mode = 1;
-				rc = dsi_ai2202_tx_cmd_set(panel, DSI_CMD_SET_AOD_LOW);
-			}
-		} else { // to prevent display off
-			DSI_LOG("set AOD Other command\n");
-			rc = dsi_ai2202_tx_cmd_set(panel, DSI_CMD_SET_AOD_OTHER);
-		}
-
-		if (rc) {
-			DSI_LOG("unable to set AOD command\n");
-			g_display->panel->aod_mode = 0;
-		}
 	}
 }
 
@@ -852,50 +746,6 @@ static void dsi_create_drm_class_obj(void)
 	}
 }
 
-// to record & restore user's last backlight
-void dsi_ai2202_record_backlight(u32 bl_lvl)
-{
-	if (bl_lvl == 0)
-		return;
-
-	if (g_display->panel->panel_last_backlight == bl_lvl) {
-		g_display->panel->panel_bl_count = 0;
-	}
-	g_display->panel->panel_last_backlight = bl_lvl;
-	//#define SDE_MODE_DPMS_LP1	1      sde_drm.h
-	//#define SDE_MODE_DPMS_LP2	2
-
-	if ((g_display->panel->power_mode == 1) ||
-		(g_display->panel->power_mode == 2)) {
-		dsi_ai2202_aod_backlight(g_display->panel);
-	}
-}
-
-void dsi_ai2202_frame_commit_cnt(struct drm_crtc *crtc)
-{
-	static int aod_delay_frames = 0;
-
-	if (display_commit_cnt > 0 && !strcmp(crtc->name, "crtc-0")) {
-		DSI_LOG("fbc%d\n", display_commit_cnt);
-		display_commit_cnt--;
-	}
-
-	if(g_display->panel->aod_delay && g_display->panel->aod_state) {
-		aod_delay_frames++;
-		// for receive msg case only
-		if(aod_delay_frames >= 5) {
-			dsi_ai2202_need_aod_reset(g_display->panel);
-			aod_delay_frames = 0;
-		}
-	}
-}
-
-// to show & clear frame commit count
-void dsi_ai2202_clear_commit_cnt(void)
-{
-	display_commit_cnt = COMMIT_FRAMES_COUNT;
-}
-
 void dsi_ai2202_display_init(struct dsi_display *display)
 {
 	DSI_LOG("dsi_ai2202_display_init  !\n ");
@@ -906,11 +756,8 @@ void dsi_ai2202_display_init(struct dsi_display *display)
 
 	g_display->panel->panel_hbm_mode = 0;
 	g_display->panel->panel_is_on = false;
-	g_display->panel->panel_bl_count = 0;
 	g_display->panel->dc_bl_delay = false;
 	g_display->panel->csc_mode = 0;
-	g_display->panel->aod_state = false;
-	g_display->panel->aod_delay = false;
 
 	proc_create(LCD_UNIQUE_ID, 0444, NULL, &lcd_unique_id_ops);
 	proc_create(PANEL_VENDOR_ID, 0640, NULL, &panel_vendor_id_ops);
@@ -940,12 +787,6 @@ void dsi_ai2202_set_panel_is_on(bool on)
 	if (on == false) {
 		DSI_LOG("dsi_ai2202_set_panel_is_on  false !\n ");
 		g_display->panel->panel_hbm_mode = 0;
-		g_display->panel->panel_last_backlight = 0;
-		g_display->panel->panel_aod_last_bl = 0;
-		g_display->panel->aod_state = false;
-		g_display->panel->aod_delay = false;
-		g_display->panel->aod_mode = 0;
-		g_display->panel->panel_bl_count = 0;
 		display_panel_clear_dc();
 		g_display->panel->csc_mode = 0;
 	}
@@ -981,10 +822,6 @@ bool ai2202_need_skip_data(u32 c2_last)
 {
 	bool rc = false;
 
-	// don't validate if no dc change
-	if (!atomic_read(&g_display->panel->is_dc_change))
-		return rc;
-
 	rc = dsi_ai2202_validate_c2_last(c2_last);
 	DSI_LOG("igc=%s\n", rc?"skip":"apply");
 	return rc;
@@ -997,15 +834,12 @@ void ai2202_store_c2_last(u32 c2_last)
 
 static void dsi_ai2202_dc_bl_set(void)
 {
-	atomic_set(&g_display->panel->allow_bl_change, 1);
-	dsi_ai2202_restore_backlight();
 	display_panel_clear_dc();
 }
 
 // called every frame commit
 void ai2202_set_dc_bl_process(struct drm_encoder *encoder, struct drm_crtc *crtc)
 {
-	int rc = 0;
 	static int csc_cnt = 0;
 	if (!display_panel_valid())
 		return;
@@ -1024,10 +858,6 @@ void ai2202_set_dc_bl_process(struct drm_encoder *encoder, struct drm_crtc *crtc
 		csc_cnt++;
 	}
 
-	// don't validate if no dc change
-	if (!atomic_read(&g_display->panel->is_dc_change))
-		return;
-
 	// only set bl after is_bl_ready count to 2
 	if (!(atomic_read(&g_display->panel->is_bl_ready) == 2))
 		return;
@@ -1044,14 +874,6 @@ exit:
 	csc_cnt = 0;
 
 	mutex_unlock(&g_display->panel->panel_lock);
-	// fps switch pending
-	if (atomic_read(&g_display->panel->is_fps_pending)) {
-		rc = dsi_panel_switch(g_display->panel);
-		if (rc)
-			DSI_ERR("[%s] failed to switch DSI panel mode, rc=%d\n",
-				   g_display->name, rc);
-		atomic_set(&g_display->panel->is_fps_pending, 0);
-	}
 }
 
 module_param_string(LCDUID, dsi_display_unique_id, MAX_CMDLINE_PARAM_LEN,

@@ -4211,9 +4211,6 @@ void sde_crtc_commit_kickoff(struct drm_crtc *crtc,
 		spin_unlock_irqrestore(&dev->event_lock, flags);
 	}
 
-	/* ASUS BSP Display +++ */
-	dsi_ai2202_frame_commit_cnt(crtc);
-
 	SDE_ATRACE_END("crtc_commit");
 }
 
@@ -4711,9 +4708,6 @@ static void sde_crtc_disable(struct drm_crtc *crtc)
 
 	power_on = 0;
 	sde_crtc_event_notify(crtc, DRM_EVENT_CRTC_POWER, &power_on, sizeof(u32));
-
-	/* ASUS BSP Display +++ */
-	dsi_ai2202_clear_commit_cnt();
 
 	mutex_unlock(&sde_crtc->crtc_lock);
 }

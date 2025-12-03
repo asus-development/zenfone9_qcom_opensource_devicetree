@@ -23,9 +23,6 @@
 #include "dsi_ai2202.h"
 #include <linux/interrupt.h>
 #include <linux/irq.h>
-#if defined ASUS_AI2202_PROJECT
-extern int display_commit_cnt;
-#endif
 
 /**
  * topology is currently defined by a set of following 3 values:
@@ -623,23 +620,11 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 	}
 
 #if defined ASUS_AI2202_PROJECT
-	DSI_LOG("[from] set bl=%d\n", bl_lvl);
-	dsi_ai2202_record_backlight(bl_lvl);
-
-	// bl denied due to DC mode changed
-	// risk: is_dc_change always is true
-	if (atomic_read(&panel->is_dc_change) &&
-		!atomic_read(&panel->allow_bl_change) && (bl_lvl > 0)) {
-		DSI_LOG("dc no bl\n");
-		return rc;
-	}
-
 	if (panel->panel_hbm_mode == 3) {
 		DSI_LOG("hbm mode %d no bl\n", panel->panel_hbm_mode);
 		return rc;
 	}
 
-	dsi_ai2202_set_dimming_smooth(panel, bl_lvl);
 	bl_lvl = dsi_ai2202_backlightupdate(bl_lvl);
 	DSI_LOG("[to] set bl=%d\n", bl_lvl);
 #endif
@@ -4577,14 +4562,6 @@ int dsi_panel_set_lp1(struct dsi_panel *panel)
 		DSI_ERR("[%s] failed to send DSI_CMD_SET_LP1 cmd, rc=%d\n",
 		       panel->name, rc);
 
-#if defined ASUS_AI2202_PROJECT
-	panel->aod_state = true;
-	// for AOD state restore backlight after received notify
-	if(display_commit_cnt < COMMIT_FRAMES_COUNT) {
-		panel->aod_delay = true;
-	}
-#endif
-
 exit:
 	mutex_unlock(&panel->panel_lock);
 	return rc;
@@ -4607,6 +4584,7 @@ int dsi_panel_set_lp2(struct dsi_panel *panel)
 	if (rc)
 		DSI_ERR("[%s] failed to send DSI_CMD_SET_LP2 cmd, rc=%d\n",
 		       panel->name, rc);
+
 exit:
 	mutex_unlock(&panel->panel_lock);
 	return rc;
@@ -4625,13 +4603,6 @@ int dsi_panel_set_nolp(struct dsi_panel *panel)
 	if (!panel->panel_initialized)
 		goto exit;
 
-#if defined ASUS_AI2202_PROJECT
-	if (!panel->aod_state) {
-		DSI_LOG("already exit to normal mode\n");
-		goto exit;
-	}
-#endif
-
 	/*
 	 * Consider about LP1->LP2->NOLP.
 	 */
@@ -4645,10 +4616,6 @@ int dsi_panel_set_nolp(struct dsi_panel *panel)
 		DSI_ERR("[%s] failed to send DSI_CMD_SET_NOLP cmd, rc=%d\n",
 		       panel->name, rc);
 exit:
-#if defined ASUS_AI2202_PROJECT
-	panel->aod_state = false;
-	panel->panel_aod_last_bl = 0;
-#endif
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -4935,20 +4902,6 @@ int dsi_panel_switch(struct dsi_panel *panel)
 	}
 
 	mutex_lock(&panel->panel_lock);
-
-#if defined ASUS_AI2202_PROJECT
-	if (panel->aod_state) {
-		DSI_LOG("exit AOD (%d) before fps change\n", panel->aod_state);
-		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_NOLP);
-		if (rc)
-			DSI_ERR("[%s] failed to send DSI_CMD_SET_NOLP cmds, rc=%d\n",
-				   panel->name, rc);
-		else {
-			panel->aod_state = false;
-			panel->panel_aod_last_bl = 0;
-		}
-	}
-#endif
 
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_TIMING_SWITCH);
 	if (rc)

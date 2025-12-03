@@ -297,19 +297,10 @@ struct dsi_panel {
 	const char *panel_vendor_id;
 	int panel_hbm_mode;
 	bool panel_is_on;
-	bool aod_state;
-	bool aod_delay;
-	int aod_mode;
-	u32 panel_last_backlight;
-	u32 panel_aod_last_bl;
-	int panel_bl_count; // count for enable dimming
 	int dc_mode;
 	bool dc_bl_delay;
 	u32 c2_last; // store c2_last value
-	atomic_t is_dc_change;
 	atomic_t is_bl_ready;
-	atomic_t allow_bl_change;
-	atomic_t is_fps_pending;
 	atomic_t is_i6_change;
 	u32 csc_mode; // pw i6 mode
 #endif
