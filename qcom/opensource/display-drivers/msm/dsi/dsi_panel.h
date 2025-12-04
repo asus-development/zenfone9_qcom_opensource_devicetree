@@ -143,6 +143,7 @@ struct dsi_backlight_config {
 	/* current brightness value */
 	u32 brightness;
 	u32 bl_level;
+	u32 real_bl_level;
 	u32 bl_scale;
 	u32 bl_scale_sv;
 	u32 bl_dcs_subtype;
