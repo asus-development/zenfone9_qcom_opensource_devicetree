@@ -4544,9 +4544,9 @@ int dsi_panel_update_aod_mode(struct dsi_panel *panel, int power_mode)
 	if (power_mode != SDE_MODE_DPMS_LP1 && power_mode != SDE_MODE_DPMS_LP2)
 		return 0;
 
-	if (bl_lvl == 61)
+	if (bl_lvl >= 61)
 		cmd = DSI_CMD_SET_AOD_HIGH;
-	else if (bl_lvl == 4)
+	else if (bl_lvl >= 4)
 		cmd = DSI_CMD_SET_AOD_LOW;
 	else
 		cmd = DSI_CMD_SET_AOD_OTHER;
